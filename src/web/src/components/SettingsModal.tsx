@@ -62,6 +62,9 @@ export default function SettingsModal({ onClose }: Props) {
     }
   }
 
+  const [encryptionLoading, setEncryptionLoading] = useState(false);
+  const [encryptionSuccess, setEncryptionSuccess] = useState(false);
+
   async function setupEncryption() {
     if (password !== confirmPassword) {
       alert('Passwords do not match');
@@ -72,17 +75,37 @@ export default function SettingsModal({ onClose }: Props) {
       return;
     }
 
+    setEncryptionLoading(true);
+    
     try {
-      await fetch('/api/settings/encryption/setup', {
+      const res = await fetch('/api/settings/encryption/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        alert(data.error || 'Failed to setup encryption');
+        setEncryptionLoading(false);
+        return;
+      }
+      
       setPassword('');
       setConfirmPassword('');
+      setEncryptionSuccess(true);
       fetchSettings();
+      
+      // Auto-close after success
+      setTimeout(() => {
+        setEncryptionSuccess(false);
+      }, 3000);
     } catch (err) {
       console.error('Failed to setup encryption:', err);
+      alert('Failed to setup encryption');
+    } finally {
+      setEncryptionLoading(false);
     }
   }
 
@@ -193,6 +216,22 @@ export default function SettingsModal({ onClose }: Props) {
                   All backups are encrypted with XChaCha20-Poly1305
                 </p>
               </div>
+            ) : encryptionSuccess ? (
+              <div
+                style={{
+                  padding: '1rem',
+                  background: 'rgba(46, 204, 113, 0.1)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                }}
+              >
+                <p style={{ color: 'var(--success)', fontSize: '1.25rem' }}>
+                  ✅ Encryption configured!
+                </p>
+                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                  You can now start backing up your files.
+                </p>
+              </div>
             ) : (
               <>
                 <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
@@ -207,6 +246,7 @@ export default function SettingsModal({ onClose }: Props) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter encryption password"
+                    disabled={encryptionLoading}
                   />
                 </div>
 
@@ -217,15 +257,32 @@ export default function SettingsModal({ onClose }: Props) {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Confirm password"
+                    disabled={encryptionLoading}
                   />
                 </div>
 
                 <button
                   className="primary"
                   onClick={setupEncryption}
-                  disabled={password.length < 12 || password !== confirmPassword}
+                  disabled={password.length < 12 || password !== confirmPassword || encryptionLoading}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
                 >
-                  Enable Encryption
+                  {encryptionLoading ? (
+                    <>
+                      <span style={{ 
+                        display: 'inline-block', 
+                        width: '1rem', 
+                        height: '1rem', 
+                        border: '2px solid transparent',
+                        borderTopColor: 'white',
+                        borderRadius: '50%',
+                        animation: 'spin 1s linear infinite',
+                      }} />
+                      Setting up...
+                    </>
+                  ) : (
+                    'Enable Encryption'
+                  )}
                 </button>
               </>
             )}

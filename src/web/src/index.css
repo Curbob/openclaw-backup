@@ -273,6 +273,12 @@ button:disabled {
   border-color: var(--accent);
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 1rem;

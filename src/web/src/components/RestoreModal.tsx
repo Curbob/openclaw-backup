@@ -24,7 +24,7 @@ export default function RestoreModal({ snapshot, onClose }: Props) {
     setProgress(0);
 
     try {
-      await fetch('/api/restore/start', {
+      const res = await fetch('/api/restore/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -32,25 +32,39 @@ export default function RestoreModal({ snapshot, onClose }: Props) {
           targetPath: restoreMode === 'custom' ? targetPath : null,
         }),
       });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to start restore');
+        setRestoring(false);
+        return;
+      }
 
       // Poll progress
       const interval = setInterval(async () => {
-        const res = await fetch('/api/restore/status');
-        const status = await res.json();
+        const statusRes = await fetch('/api/restore/status');
+        const status = await statusRes.json();
         
         if (!status.running) {
           clearInterval(interval);
           setProgress(100);
+          
+          if (status.errors && status.errors.length > 0) {
+            alert(`Restore completed with ${status.errors.length} error(s)`);
+          }
+          
           setTimeout(onClose, 1000);
         } else {
-          setProgress(
-            Math.round((status.filesRestored / status.totalFiles) * 100) || 0
-          );
+          const pct = status.filesTotal > 0 
+            ? Math.round((status.filesRestored / status.filesTotal) * 100) 
+            : 0;
+          setProgress(pct);
         }
       }, 500);
     } catch (err) {
       console.error('Failed to start restore:', err);
       setRestoring(false);
+      alert('Failed to start restore');
     }
   }
 
