@@ -733,6 +733,102 @@ program
   });
 
 // ─────────────────────────────────────────────────────────────
+// Cleanup - Remove orphan chunks
+// ─────────────────────────────────────────────────────────────
+program
+  .command('cleanup')
+  .description('Find and remove orphan chunks')
+  .option('--dry-run', 'Show what would be deleted without deleting')
+  .option('--verify', 'Verify database integrity instead of cleanup')
+  .action(async (options) => {
+    const { initDb } = await import('../core/db.js');
+    const { findOrphanChunks, cleanupOrphanChunks, verifyIntegrity } = await import('../core/cleanup.js');
+    
+    initDb();
+    
+    if (options.verify) {
+      const spinner = ora('Verifying database integrity...').start();
+      
+      try {
+        const result = await verifyIntegrity();
+        
+        if (result.valid) {
+          spinner.succeed('Database integrity OK');
+        } else {
+          spinner.warn(`Found ${result.issues.length} issue(s)`);
+        }
+        
+        console.log(chalk.dim(`\n  Snapshots: ${result.stats.snapshots}`));
+        console.log(chalk.dim(`  Files:     ${result.stats.files}`));
+        console.log(chalk.dim(`  Chunks:    ${result.stats.chunks}`));
+        
+        if (result.issues.length > 0) {
+          console.log(chalk.yellow('\n  Issues:'));
+          for (const issue of result.issues.slice(0, 10)) {
+            console.log(chalk.dim(`    - ${issue}`));
+          }
+          if (result.issues.length > 10) {
+            console.log(chalk.dim(`    ... and ${result.issues.length - 10} more`));
+          }
+        }
+        console.log();
+      } catch (err: any) {
+        spinner.fail(`Verification failed: ${err.message}`);
+      }
+      return;
+    }
+    
+    const spinner = ora('Scanning for orphan chunks...').start();
+    
+    try {
+      if (options.dryRun) {
+        const stats = await findOrphanChunks((progress) => {
+          spinner.text = progress.message;
+        });
+        
+        spinner.succeed('Scan complete (dry run)');
+        
+        console.log(chalk.dim(`\n  Total chunks:      ${stats.totalChunks}`));
+        console.log(chalk.dim(`  Referenced chunks: ${stats.referencedChunks}`));
+        console.log(chalk.dim(`  Orphan chunks:     ${stats.orphanChunks}`));
+        console.log(chalk.dim(`  Space to reclaim:  ${formatBytes(stats.orphanBytes)}`));
+        
+        if (stats.orphanChunks > 0) {
+          console.log(chalk.yellow(`\n  Run without --dry-run to delete orphan chunks\n`));
+        } else {
+          console.log(chalk.green(`\n  No orphan chunks found!\n`));
+        }
+      } else {
+        // Actual cleanup
+        const result = await cleanupOrphanChunks({
+          onProgress: (progress) => {
+            spinner.text = progress.message;
+          },
+        });
+        
+        if (result.deletedChunks > 0) {
+          spinner.succeed(`Cleaned up ${result.deletedChunks} orphan chunks`);
+          console.log(chalk.dim(`\n  Reclaimed: ${formatBytes(result.orphanBytes)}`));
+        } else if (result.orphanChunks === 0) {
+          spinner.succeed('No orphan chunks found');
+        } else {
+          spinner.warn(`Found ${result.orphanChunks} orphan chunks but deleted ${result.deletedChunks}`);
+        }
+        
+        if (result.errors.length > 0) {
+          console.log(chalk.yellow(`\n  Errors: ${result.errors.length}`));
+          for (const err of result.errors.slice(0, 5)) {
+            console.log(chalk.dim(`    - ${err}`));
+          }
+        }
+        console.log();
+      }
+    } catch (err: any) {
+      spinner.fail(`Cleanup failed: ${err.message}`);
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────
 // Serve - Start web UI
 // ─────────────────────────────────────────────────────────────
 program

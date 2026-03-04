@@ -7,6 +7,7 @@ import { snapshotRoutes } from './routes/snapshots.js';
 import { settingsRoutes } from './routes/settings.js';
 import { scheduleRoutes } from './routes/schedule.js';
 import { gdriveRoutes } from './routes/gdrive.js';
+import { cleanupRoutes } from './routes/cleanup.js';
 import { initDb, getStats } from '../core/db.js';
 import { startScheduler, getScheduleConfig } from '../core/scheduler.js';
 
@@ -29,6 +30,7 @@ export function createServer(): Express {
   app.use('/api/settings', settingsRoutes);
   app.use('/api/schedule', scheduleRoutes);
   app.use('/api/gdrive', gdriveRoutes);
+  app.use('/api/cleanup', cleanupRoutes);
 
   // Health check
   app.get('/api/health', (_req, res) => {
