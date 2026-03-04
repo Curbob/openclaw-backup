@@ -109,12 +109,31 @@ Data is stored in `~/.local/share/openclaw-backup/`:
 
 ### Google Drive
 
+**Step 1: Create OAuth Credentials**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select existing)
+3. Go to **APIs & Services → Library**
+4. Search for "Google Drive API" and **Enable** it
+5. Go to **APIs & Services → Credentials**
+6. Click **Create Credentials → OAuth client ID**
+7. If prompted, configure the OAuth consent screen:
+   - User Type: **External** (or Internal if using Workspace)
+   - App name: "OpenClaw Backup" (or whatever you want)
+   - Add your email as a test user
+8. Back to Credentials → Create OAuth client ID:
+   - Application type: **Desktop app**
+   - Name: "OpenClaw Backup"
+9. Download or copy the **Client ID** and **Client Secret**
+
+**Step 2: Connect to Google Drive**
+
 ```bash
-# Add Google Drive
+# Add Google Drive (will prompt for Client ID and Secret)
 node dist/cli/index.js remote add gdrive
 
-# This opens a browser for OAuth authorization
-# Tokens are stored locally and refresh automatically
+# This opens a browser for authorization
+# Grant access, then tokens are stored locally
 
 # Test the connection
 node dist/cli/index.js remote test gdrive
