@@ -43,6 +43,7 @@ export interface Chunk {
 export interface FileEntry {
   snapshotId: string;
   path: string;
+  rootPath?: string;      // Original source root (for multi-path backups)
   size: number;
   modifiedAt: string;
   mode: number;
@@ -112,12 +113,13 @@ export function initDb(): Database.Database {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       snapshot_id TEXT NOT NULL,
       path TEXT NOT NULL,
+      root_path TEXT,
       size INTEGER NOT NULL,
       modified_at TEXT NOT NULL,
       mode INTEGER NOT NULL DEFAULT 420,
       chunks_json TEXT NOT NULL,
       FOREIGN KEY (snapshot_id) REFERENCES snapshots(id) ON DELETE CASCADE,
-      UNIQUE(snapshot_id, path)
+      UNIQUE(snapshot_id, path, root_path)
     );
 
     -- Storage destinations
@@ -142,6 +144,13 @@ export function initDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
     CREATE INDEX IF NOT EXISTS idx_chunks_destination ON chunks(destination_id);
   `);
+
+  // Migration: Add root_path column if it doesn't exist (for multi-source backups)
+  try {
+    db.prepare('SELECT root_path FROM files LIMIT 1').get();
+  } catch {
+    db.exec('ALTER TABLE files ADD COLUMN root_path TEXT');
+  }
 
   // Insert default local destination if none exists
   const destCount = db.prepare('SELECT COUNT(*) as count FROM destinations').get() as { count: number };
@@ -329,11 +338,12 @@ export function addFile(file: FileEntry): void {
   const db = getDb();
   
   db.prepare(`
-    INSERT INTO files (snapshot_id, path, size, modified_at, mode, chunks_json)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO files (snapshot_id, path, root_path, size, modified_at, mode, chunks_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     file.snapshotId,
     file.path,
+    file.rootPath || null,
     file.size,
     file.modifiedAt,
     file.mode,
@@ -348,6 +358,7 @@ export function getFilesForSnapshot(snapshotId: string): FileEntry[] {
   return rows.map(row => ({
     snapshotId: row.snapshot_id,
     path: row.path,
+    rootPath: row.root_path || undefined,
     size: row.size,
     modifiedAt: row.modified_at,
     mode: row.mode,

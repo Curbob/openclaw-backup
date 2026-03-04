@@ -135,16 +135,21 @@ program
       await initEncryption(answers.password);
       
       spinner.succeed('Backup repository initialized');
-      console.log(chalk.dim(`\n  Source:      ${answers.source}`));
+      console.log(chalk.dim(`\n  Workspace:   ${answers.source}`));
+      console.log(chalk.dim(`  Config:      ${OPENCLAW_CONFIG}`));
       console.log(chalk.dim(`  Destination: ${answers.dest}`));
       console.log(chalk.dim(`  Encryption:  XChaCha20-Poly1305 + Argon2id`));
       console.log(chalk.green('\n✅ Ready to backup! Run: openclaw-backup backup\n'));
+      console.log(chalk.dim('  Note: Both workspace and OpenClaw config are backed up by default.\n'));
     } catch (err: any) {
       spinner.fail('Setup failed');
       console.log(chalk.red(`\n  Error: ${err.message}\n`));
       process.exit(1);
     }
   });
+
+// OpenClaw config path
+const OPENCLAW_CONFIG = join(homedir(), '.config', 'openclaw');
 
 // ─────────────────────────────────────────────────────────────
 // Backup - Create a new snapshot
@@ -154,6 +159,7 @@ program
   .description('Create a new backup snapshot')
   .option('-s, --source <path>', 'Source path to backup')
   .option('-l, --label <label>', 'Optional label for this backup')
+  .option('--no-config', 'Skip backing up ~/.config/openclaw')
   .option('--dry-run', 'Show what would be backed up')
   .action(async (options) => {
     const { initDb, getSetting } = await import('../core/db.js');
@@ -194,12 +200,19 @@ program
       return;
     }
     
+    // Build additional paths (OpenClaw config by default)
+    const additionalPaths: string[] = [];
+    if (options.config !== false) {
+      additionalPaths.push(OPENCLAW_CONFIG);
+    }
+    
     const spinner = ora('Starting backup...').start();
     let lastPhase = '';
     
     try {
       const result = await runBackup({
         sourcePath,
+        additionalPaths: additionalPaths.length > 0 ? additionalPaths : undefined,
         label: options.label,
         onProgress: (progress) => {
           if (progress.phase !== lastPhase) {
@@ -883,7 +896,8 @@ program
     
     console.log(chalk.bold('\n📊 Backup Status\n'));
     
-    console.log(chalk.dim('  Source:      ') + sourcePaths[0]);
+    console.log(chalk.dim('  Workspace:   ') + sourcePaths[0]);
+    console.log(chalk.dim('  Config:      ') + OPENCLAW_CONFIG);
     
     if (snapshots.length > 0) {
       const lastBackup = new Date(snapshots[0].timestamp).toLocaleString('en-US', {

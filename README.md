@@ -6,6 +6,7 @@ Encrypted, incremental backup tool for OpenClaw workspaces. Local-first with opt
 
 - **Encrypted at rest** — XChaCha20-Poly1305 + Argon2id key derivation
 - **Incremental backups** — Content-defined chunking (FastCDC) with SHA-256 deduplication
+- **Complete backup** — Workspace + OpenClaw config backed up together
 - **Multiple destinations** — Local storage + Google Drive (more coming)
 - **Scheduled backups** — Built-in cron-style scheduler
 - **Web UI** — Dashboard at `http://localhost:11480`
@@ -150,27 +151,38 @@ cp /path/to/your/backup/encryption.key ~/.config/openclaw-backup/
 # 3. If using Google Drive, re-authenticate
 openclaw-backup remote add gdrive
 
-# 4. Restore your workspace
-openclaw-backup restore <snapshot-id> ~/clawd
+# 4. Restore everything (workspace + config restored to original locations)
+openclaw-backup restore <snapshot-id>
 
-# 5. Restore OpenClaw config (if you backed it up separately)
-cp /path/to/your/backup/openclaw-config.yaml ~/.config/openclaw/config.yaml
+# Or restore to a test directory first:
+openclaw-backup restore <snapshot-id> ~/restore-test
 
-# 6. Start OpenClaw
+# 5. Start OpenClaw
 openclaw gateway start
 ```
+
+When restoring to the original locations, files go back where they came from:
+- Workspace files → `~/clawd/`
+- Config files → `~/.config/openclaw/`
+
+When restoring to a test directory, sources are kept separate:
+- `~/restore-test/Users_you_clawd/` — workspace files
+- `~/restore-test/Users_you_.config_openclaw/` — config files
 
 Your agent wakes up with all its memories, personality, and projects intact.
 
 **What gets restored:**
-- AGENTS.md, SOUL.md, USER.md, TOOLS.md — agent personality & behavior
-- memory/ — daily logs, context, learned patterns
-- skills/ — custom skills
-- All your projects and files
+- **Workspace** (`~/clawd` by default):
+  - AGENTS.md, SOUL.md, USER.md, TOOLS.md — agent personality & behavior
+  - memory/ — daily logs, context, learned patterns
+  - skills/ — custom skills
+  - All your projects and files
+- **OpenClaw config** (`~/.config/openclaw/`):
+  - config.yaml — gateway settings, API keys, channel configs
+  - session data, OAuth tokens
 
 **What you need separately:**
 - OpenClaw installation (`npm install -g openclaw`)
-- OpenClaw config with API keys (`~/.config/openclaw/config.yaml`)
 - Your encryption key (`~/.config/openclaw-backup/encryption.key`)
 
 💡 **Tip:** Store your encryption key and OpenClaw config in a password manager or secure location outside your workspace.

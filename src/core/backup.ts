@@ -36,6 +36,7 @@ export interface BackupProgress {
 
 export interface BackupOptions {
   sourcePath: string;
+  additionalPaths?: string[];  // Additional paths to include (e.g., ~/.config/openclaw)
   label?: string;
   excludePatterns?: string[];
   onProgress?: (progress: BackupProgress) => void;
@@ -100,7 +101,16 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
     }
   };
 
-  // Phase 1: Scan files
+  // Phase 1: Scan files from all source paths
+  interface FileWithRoot {
+    file: typeof scanResult.files[0];
+    rootPath: string;
+  }
+  
+  const allFiles: FileWithRoot[] = [];
+  let totalSkipped = 0;
+  
+  // Scan primary source
   const scanResult = await scanDirectory(options.sourcePath, {
     excludePatterns: options.excludePatterns,
     onProgress: (count, file) => {
@@ -109,19 +119,50 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
       emitProgress();
     },
   });
-
-  progress.filesTotal = scanResult.files.length;
+  
+  for (const file of scanResult.files) {
+    allFiles.push({ file, rootPath: options.sourcePath });
+  }
+  totalSkipped += scanResult.skipped;
   errors.push(...scanResult.errors);
+  
+  // Scan additional paths (e.g., ~/.config/openclaw)
+  if (options.additionalPaths) {
+    for (const additionalPath of options.additionalPaths) {
+      try {
+        const additionalResult = await scanDirectory(additionalPath, {
+          excludePatterns: options.excludePatterns,
+          onProgress: (count, file) => {
+            progress.filesScanned += count;
+            progress.currentFile = file;
+            emitProgress();
+          },
+        });
+        
+        for (const file of additionalResult.files) {
+          allFiles.push({ file, rootPath: additionalPath });
+        }
+        totalSkipped += additionalResult.skipped;
+        errors.push(...additionalResult.errors);
+      } catch (err: any) {
+        // Additional path might not exist, that's OK
+        errors.push(`Skipped ${additionalPath}: ${err.message}`);
+      }
+    }
+  }
+
+  progress.filesTotal = allFiles.length;
 
   // Phase 2: Process files
   progress.phase = 'processing';
   emitProgress();
 
-  const fileChunks: Map<string, string[]> = new Map();
+  // Map: "rootPath:relativePath" -> chunkHashes
+  const fileChunks: Map<string, { rootPath: string; chunks: string[] }> = new Map();
   let totalBytesStored = 0;
   let deduplicatedBytes = 0;
 
-  for (const file of scanResult.files) {
+  for (const { file, rootPath } of allFiles) {
     progress.currentFile = file.path;
     emitProgress();
 
@@ -174,7 +215,8 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
         }
       }
 
-      fileChunks.set(file.path, chunkHashes);
+      const fileKey = `${rootPath}:${file.path}`;
+      fileChunks.set(fileKey, { rootPath, chunks: chunkHashes });
       progress.filesProcessed++;
       
       // Update compression ratio
@@ -210,16 +252,18 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
   });
 
   // Add file records
-  for (const file of scanResult.files) {
-    const chunks = fileChunks.get(file.path);
-    if (chunks) {
+  for (const { file, rootPath } of allFiles) {
+    const fileKey = `${rootPath}:${file.path}`;
+    const fileData = fileChunks.get(fileKey);
+    if (fileData) {
       addFile({
         snapshotId: snapshot.id,
         path: file.path,
+        rootPath: fileData.rootPath,
         size: file.size,
         modifiedAt: file.modifiedAt.toISOString(),
         mode: file.mode,
-        chunks,
+        chunks: fileData.chunks,
       });
     }
   }
@@ -390,9 +434,23 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
 
       // Determine output path
       progress.phase = 'writing';
-      const outputPath = options.targetPath 
-        ? join(options.targetPath, file.path)
-        : file.path; // Original path (relative to source)
+      let outputPath: string;
+      
+      if (options.targetPath) {
+        // Restoring to a custom target - put everything there
+        // Use rootPath as a subdirectory to keep sources separate
+        if (file.rootPath) {
+          const rootName = file.rootPath.replace(/^\//, '').replace(/\//g, '_');
+          outputPath = join(options.targetPath, rootName, file.path);
+        } else {
+          outputPath = join(options.targetPath, file.path);
+        }
+      } else {
+        // Restore to original locations
+        outputPath = file.rootPath 
+          ? join(file.rootPath, file.path)
+          : file.path;
+      }
 
       // Ensure directory exists
       await mkdir(dirname(outputPath), { recursive: true });
