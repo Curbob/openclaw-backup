@@ -234,6 +234,97 @@ npm run build:web
 npm run dev:web
 ```
 
+## Run on Startup
+
+To keep the scheduler and web UI running automatically:
+
+### macOS (launchd)
+
+```bash
+# Create the plist
+cat > ~/Library/LaunchAgents/com.openclaw.backup.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openclaw.backup</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/path/to/openclaw-backup/dist/cli/index.js</string>
+        <string>serve</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/openclaw-backup.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/openclaw-backup.err</string>
+</dict>
+</plist>
+EOF
+
+# Update the node path (find yours with: which node)
+# Update the script path to where you cloned the repo
+
+# Load it
+launchctl load ~/Library/LaunchAgents/com.openclaw.backup.plist
+
+# Check status
+launchctl list | grep openclaw
+```
+
+### Linux (systemd)
+
+```bash
+# Create user service
+mkdir -p ~/.config/systemd/user
+
+cat > ~/.config/systemd/user/openclaw-backup.service << 'EOF'
+[Unit]
+Description=OpenClaw Backup Server
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /path/to/openclaw-backup/dist/cli/index.js serve
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Update paths as needed, then:
+systemctl --user daemon-reload
+systemctl --user enable openclaw-backup
+systemctl --user start openclaw-backup
+
+# Check status
+systemctl --user status openclaw-backup
+```
+
+### Windows (Task Scheduler)
+
+1. Open Task Scheduler
+2. Create Basic Task → "OpenClaw Backup"
+3. Trigger: "When the computer starts"
+4. Action: Start a program
+   - Program: `node`
+   - Arguments: `C:\path\to\openclaw-backup\dist\cli\index.js serve`
+5. Finish and check "Open Properties"
+6. Check "Run whether user is logged on or not"
+
+Or use PowerShell:
+```powershell
+$action = New-ScheduledTaskAction -Execute "node" -Argument "C:\path\to\openclaw-backup\dist\cli\index.js serve"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+Register-ScheduledTask -TaskName "OpenClaw Backup" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
 ## Roadmap
 
 - [ ] Compression before encryption (zstd)
