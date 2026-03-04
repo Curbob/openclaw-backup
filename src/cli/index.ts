@@ -32,50 +32,118 @@ program
   .command('init')
   .description('Initialize backup repository')
   .option('-d, --dest <path>', 'Backup destination path')
+  .option('-s, --source <path>', 'Source path to backup')
+  .option('-p, --password <password>', 'Encryption password (for non-interactive setup)')
   .action(async (options) => {
     console.log(chalk.bold('\n🛡️  OpenClaw Backup Setup\n'));
 
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'source',
-        message: 'Workspace to backup:',
-        default: DEFAULT_SOURCE
-      },
-      {
-        type: 'input',
-        name: 'dest',
-        message: 'Backup destination:',
-        default: options.dest || join(homedir(), 'OpenClaw-Backups')
-      },
-      {
-        type: 'password',
-        name: 'password',
-        message: 'Encryption password:',
-        mask: '•'
-      },
-      {
-        type: 'password',
-        name: 'confirmPassword',
-        message: 'Confirm password:',
-        mask: '•'
-      }
-    ]);
+    // Import db and backup modules
+    const { initDb, setSetting } = await import('../core/db.js');
+    const { initEncryption, isEncryptionConfigured } = await import('../core/backup.js');
+    const { LocalStorage } = await import('../core/storage.js');
 
-    if (answers.password !== answers.confirmPassword) {
-      console.log(chalk.red('\n❌ Passwords do not match\n'));
-      process.exit(1);
+    // Initialize database
+    initDb();
+
+    // Check if already configured
+    if (isEncryptionConfigured() && !options.password) {
+      const { overwrite } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'overwrite',
+        message: chalk.yellow('Backup already configured. Reinitialize? (This won\'t delete existing backups)'),
+        default: false,
+      }]);
+      if (!overwrite) {
+        console.log(chalk.dim('\n  Keeping existing configuration.\n'));
+        return;
+      }
+    }
+
+    let answers: { source: string; dest: string; password: string };
+    
+    // Non-interactive mode if password is provided
+    if (options.password) {
+      if (options.password.length < 12) {
+        console.log(chalk.red('\n❌ Password must be at least 12 characters\n'));
+        process.exit(1);
+      }
+      answers = {
+        source: options.source || DEFAULT_SOURCE,
+        dest: options.dest || join(homedir(), 'OpenClaw-Backups'),
+        password: options.password,
+      };
+    } else {
+      // Interactive mode
+      const prompted = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'source',
+          message: 'Workspace to backup:',
+          default: options.source || DEFAULT_SOURCE
+        },
+        {
+          type: 'input',
+          name: 'dest',
+          message: 'Backup destination:',
+          default: options.dest || join(homedir(), 'OpenClaw-Backups')
+        },
+        {
+          type: 'password',
+          name: 'password',
+          message: 'Encryption password (min 12 chars):',
+          mask: '•',
+          validate: (input: string) => input.length >= 12 || 'Password must be at least 12 characters'
+        },
+        {
+          type: 'password',
+          name: 'confirmPassword',
+          message: 'Confirm password:',
+          mask: '•'
+        }
+      ]);
+
+      if (prompted.password !== prompted.confirmPassword) {
+        console.log(chalk.red('\n❌ Passwords do not match\n'));
+        process.exit(1);
+      }
+      
+      answers = prompted;
     }
 
     const spinner = ora('Setting up backup repository...').start();
     
-    // TODO: Actually initialize the repo
-    await new Promise(r => setTimeout(r, 1000));
-    
-    spinner.succeed('Backup repository initialized');
-    console.log(chalk.dim(`\n  Source:      ${answers.source}`));
-    console.log(chalk.dim(`  Destination: ${answers.dest}`));
-    console.log(chalk.green('\n✅ Ready to backup! Run: openclaw-backup backup\n'));
+    try {
+      // Save source path
+      setSetting('sourcePaths', JSON.stringify([answers.source]));
+      
+      // Initialize storage
+      spinner.text = 'Creating storage directories...';
+      const storage = new LocalStorage(answers.dest);
+      await storage.init();
+      
+      // Update destination in database
+      const { getDb } = await import('../core/db.js');
+      const db = getDb();
+      db.prepare(`
+        UPDATE destinations 
+        SET config_json = ? 
+        WHERE id = 'local_default'
+      `).run(JSON.stringify({ path: answers.dest }));
+      
+      // Set up encryption
+      spinner.text = 'Configuring encryption...';
+      await initEncryption(answers.password);
+      
+      spinner.succeed('Backup repository initialized');
+      console.log(chalk.dim(`\n  Source:      ${answers.source}`));
+      console.log(chalk.dim(`  Destination: ${answers.dest}`));
+      console.log(chalk.dim(`  Encryption:  XChaCha20-Poly1305 + Argon2id`));
+      console.log(chalk.green('\n✅ Ready to backup! Run: openclaw-backup backup\n'));
+    } catch (err: any) {
+      spinner.fail('Setup failed');
+      console.log(chalk.red(`\n  Error: ${err.message}\n`));
+      process.exit(1);
+    }
   });
 
 // ─────────────────────────────────────────────────────────────
@@ -84,32 +152,112 @@ program
 program
   .command('backup')
   .description('Create a new backup snapshot')
+  .option('-s, --source <path>', 'Source path to backup')
   .option('-l, --label <label>', 'Optional label for this backup')
   .option('--dry-run', 'Show what would be backed up')
   .action(async (options) => {
-    const spinner = ora('Scanning files...').start();
+    const { initDb, getSetting } = await import('../core/db.js');
+    const { runBackup, isEncryptionConfigured } = await import('../core/backup.js');
+    const { scanDirectory } = await import('../core/scanner.js');
     
-    // TODO: Implement actual backup
-    await new Promise(r => setTimeout(r, 500));
-    spinner.text = 'Chunking files...';
-    await new Promise(r => setTimeout(r, 500));
-    spinner.text = 'Encrypting...';
-    await new Promise(r => setTimeout(r, 500));
-    spinner.text = 'Uploading new chunks...';
-    await new Promise(r => setTimeout(r, 500));
+    initDb();
     
-    spinner.succeed('Backup complete');
-    
-    console.log(chalk.dim('\n  Snapshot:    abc123'));
-    console.log(chalk.dim('  Files:       42'));
-    console.log(chalk.dim('  New chunks:  7 (128 KB)'));
-    console.log(chalk.dim('  Reused:      35 chunks'));
-    console.log(chalk.dim('  Total size:  2.3 MB'));
-    if (options.label) {
-      console.log(chalk.dim(`  Label:       ${options.label}`));
+    // Check encryption is configured
+    if (!isEncryptionConfigured()) {
+      console.log(chalk.red('\n❌ Backup not initialized. Run: openclaw-backup init\n'));
+      process.exit(1);
     }
-    console.log();
+    
+    // Get source path
+    let sourcePath = options.source;
+    if (!sourcePath) {
+      const sourcePathsJson = getSetting('sourcePaths');
+      const sourcePaths = sourcePathsJson ? JSON.parse(sourcePathsJson) : [DEFAULT_SOURCE];
+      sourcePath = sourcePaths[0];
+    }
+    if (sourcePath.startsWith('~')) {
+      sourcePath = sourcePath.replace('~', homedir());
+    }
+    
+    // Dry run - just scan
+    if (options.dryRun) {
+      const spinner = ora('Scanning files...').start();
+      const result = await scanDirectory(sourcePath);
+      spinner.succeed(`Found ${result.files.length} files`);
+      
+      console.log(chalk.dim(`\n  Total size:  ${formatBytes(result.totalBytes)}`));
+      console.log(chalk.dim(`  Skipped:     ${result.skipped} files/dirs`));
+      if (result.errors.length > 0) {
+        console.log(chalk.yellow(`  Errors:      ${result.errors.length}`));
+      }
+      console.log(chalk.dim('\n  (dry run - no backup created)\n'));
+      return;
+    }
+    
+    const spinner = ora('Starting backup...').start();
+    let lastPhase = '';
+    
+    try {
+      const result = await runBackup({
+        sourcePath,
+        label: options.label,
+        onProgress: (progress) => {
+          if (progress.phase !== lastPhase) {
+            lastPhase = progress.phase;
+            switch (progress.phase) {
+              case 'scanning':
+                spinner.text = `Scanning files... ${progress.filesScanned}`;
+                break;
+              case 'processing':
+                spinner.text = `Processing ${progress.filesProcessed}/${progress.filesTotal}...`;
+                break;
+              case 'finalizing':
+                spinner.text = 'Finalizing snapshot...';
+                break;
+            }
+          } else if (progress.phase === 'scanning') {
+            spinner.text = `Scanning files... ${progress.filesScanned}`;
+          } else if (progress.phase === 'processing') {
+            spinner.text = `Processing ${progress.filesProcessed}/${progress.filesTotal} (${progress.chunksNew} new chunks)`;
+          }
+        },
+      });
+      
+      spinner.succeed('Backup complete');
+      
+      console.log(chalk.dim(`\n  Snapshot:    ${result.snapshot.id}`));
+      console.log(chalk.dim(`  Files:       ${result.filesProcessed}`));
+      console.log(chalk.dim(`  New chunks:  ${result.chunksNew} (${formatBytes(result.bytesStored)})`));
+      console.log(chalk.dim(`  Reused:      ${result.chunksReused} chunks`));
+      console.log(chalk.dim(`  Deduplicated: ${formatBytes(result.deduplicatedBytes)}`));
+      console.log(chalk.dim(`  Duration:    ${(result.duration / 1000).toFixed(1)}s`));
+      if (options.label) {
+        console.log(chalk.dim(`  Label:       ${options.label}`));
+      }
+      if (result.errors.length > 0) {
+        console.log(chalk.yellow(`  Errors:      ${result.errors.length}`));
+        for (const err of result.errors.slice(0, 5)) {
+          console.log(chalk.dim(`    - ${err}`));
+        }
+        if (result.errors.length > 5) {
+          console.log(chalk.dim(`    ... and ${result.errors.length - 5} more`));
+        }
+      }
+      console.log();
+    } catch (err: any) {
+      spinner.fail('Backup failed');
+      console.log(chalk.red(`\n  Error: ${err.message}\n`));
+      process.exit(1);
+    }
   });
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
 
 // ─────────────────────────────────────────────────────────────
 // List - Show available snapshots
@@ -121,22 +269,36 @@ program
   .option('-a, --all', 'Show all snapshots')
   .option('-n, --limit <n>', 'Number of snapshots to show', '10')
   .action(async (options) => {
+    const { initDb, getSnapshots, getStats } = await import('../core/db.js');
+    initDb();
+    
+    const limit = options.all ? 1000 : parseInt(options.limit, 10);
+    const snapshots = getSnapshots(limit);
+    const stats = getStats();
+    
     console.log(chalk.bold('\n📦 Backup Snapshots\n'));
     
-    // TODO: Read from actual database
-    const snapshots = [
-      { id: 'snap_003', date: 'Mar 3, 2026 7:45 PM', size: '2.3 MB', type: 'auto', label: null },
-      { id: 'snap_002', date: 'Mar 3, 2026 12:00 PM', size: '1.1 MB', type: 'auto', label: null },
-      { id: 'snap_001', date: 'Mar 2, 2026 11:30 PM', size: '4.7 MB', type: 'manual', label: 'pre-update' },
-    ];
+    if (snapshots.length === 0) {
+      console.log(chalk.dim('  No backups yet. Run: openclaw-backup backup\n'));
+      return;
+    }
 
     for (const snap of snapshots) {
-      const typeIcon = snap.type === 'auto' ? chalk.dim('⏰') : chalk.cyan('👤');
+      const date = new Date(snap.timestamp).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      const typeIcon = snap.type === 'scheduled' ? chalk.dim('⏰') : chalk.cyan('👤');
       const label = snap.label ? chalk.yellow(` [${snap.label}]`) : '';
-      console.log(`  ${chalk.bold(snap.id)}  ${snap.date}  ${chalk.dim(snap.size)}  ${typeIcon}${label}`);
+      const size = formatBytes(snap.totalBytes);
+      console.log(`  ${chalk.bold(snap.id)}  ${date}  ${chalk.dim(size)}  ${typeIcon}${label}`);
     }
     
-    console.log(chalk.dim(`\n  Showing ${snapshots.length} of ${snapshots.length} snapshots\n`));
+    console.log(chalk.dim(`\n  Showing ${snapshots.length} of ${stats.totalSnapshots} snapshots`));
+    console.log(chalk.dim(`  Total stored: ${formatBytes(stats.totalBytes)} (${stats.totalChunks} chunks)\n`));
   });
 
 // ─────────────────────────────────────────────────────────────
@@ -149,52 +311,121 @@ program
   .option('-f, --files <pattern>', 'Restore only matching files')
   .option('--force', 'Overwrite without prompting')
   .action(async (snapshot, options) => {
-    const targetSnapshot = snapshot || 'latest';
+    const { initDb, getSnapshots, getSnapshot, getFilesForSnapshot } = await import('../core/db.js');
+    const { runRestore, isEncryptionConfigured } = await import('../core/backup.js');
+    
+    initDb();
+    
+    // Check encryption is configured
+    if (!isEncryptionConfigured()) {
+      console.log(chalk.red('\n❌ Backup not initialized. Run: openclaw-backup init\n'));
+      process.exit(1);
+    }
+    
+    // Get snapshot
+    let targetSnapshot = snapshot;
+    if (!targetSnapshot || targetSnapshot === 'latest') {
+      const snapshots = getSnapshots(1);
+      if (snapshots.length === 0) {
+        console.log(chalk.red('\n❌ No snapshots available\n'));
+        process.exit(1);
+      }
+      targetSnapshot = snapshots[0].id;
+    }
+    
+    const snapshotData = getSnapshot(targetSnapshot);
+    if (!snapshotData) {
+      console.log(chalk.red(`\n❌ Snapshot not found: ${targetSnapshot}\n`));
+      process.exit(1);
+    }
+    
+    const files = getFilesForSnapshot(targetSnapshot);
     
     console.log(chalk.bold(`\n♻️  Restore from: ${targetSnapshot}\n`));
+    console.log(chalk.dim(`  Files: ${files.length}`));
+    console.log(chalk.dim(`  Date:  ${new Date(snapshotData.timestamp).toLocaleString()}`));
+    
+    let targetPath = options.to;
+    if (targetPath?.startsWith('~')) {
+      targetPath = targetPath.replace('~', homedir());
+    }
+    
+    // Interactive prompts unless --force
+    if (!options.force) {
+      const answers = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'destination',
+          message: 'Restore to:',
+          default: targetPath || snapshotData.sourcePath
+        },
+        {
+          type: 'confirm',
+          name: 'proceed',
+          message: chalk.yellow('This will overwrite existing files. Proceed?'),
+          default: false
+        }
+      ]);
 
-    const answers = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'destination',
-        message: 'Restore to:',
-        default: options.to || DEFAULT_SOURCE
-      },
-      {
-        type: 'confirm',
-        name: 'createBackup',
-        message: 'Create backup of current state first?',
-        default: true
-      },
-      {
-        type: 'confirm',
-        name: 'proceed',
-        message: chalk.yellow('This will overwrite existing files. Proceed?'),
-        default: false
+      if (!answers.proceed) {
+        console.log(chalk.dim('\n  Restore cancelled\n'));
+        return;
       }
-    ]);
-
-    if (!answers.proceed) {
-      console.log(chalk.dim('\n  Restore cancelled\n'));
-      return;
-    }
-
-    const spinner = ora('Restoring...').start();
-    
-    if (answers.createBackup) {
-      spinner.text = 'Creating safety backup...';
-      await new Promise(r => setTimeout(r, 500));
+      
+      targetPath = answers.destination;
     }
     
-    spinner.text = 'Downloading chunks...';
-    await new Promise(r => setTimeout(r, 500));
-    spinner.text = 'Decrypting...';
-    await new Promise(r => setTimeout(r, 500));
-    spinner.text = 'Writing files...';
-    await new Promise(r => setTimeout(r, 500));
+    if (targetPath?.startsWith('~')) {
+      targetPath = targetPath.replace('~', homedir());
+    }
+
+    const spinner = ora('Starting restore...').start();
+    let lastPhase = '';
     
-    spinner.succeed('Restore complete');
-    console.log(chalk.dim(`\n  Restored 42 files to ${answers.destination}\n`));
+    try {
+      const result = await runRestore({
+        snapshotId: targetSnapshot,
+        targetPath,
+        onProgress: (progress) => {
+          if (progress.phase !== lastPhase) {
+            lastPhase = progress.phase;
+            switch (progress.phase) {
+              case 'preparing':
+                spinner.text = 'Preparing restore...';
+                break;
+              case 'downloading':
+                spinner.text = `Reading chunks... ${progress.filesRestored}/${progress.filesTotal}`;
+                break;
+              case 'decrypting':
+                spinner.text = `Decrypting... ${progress.filesRestored}/${progress.filesTotal}`;
+                break;
+              case 'writing':
+                spinner.text = `Writing files... ${progress.filesRestored}/${progress.filesTotal}`;
+                break;
+            }
+          } else {
+            spinner.text = `${lastPhase}... ${progress.filesRestored}/${progress.filesTotal}`;
+          }
+        },
+      });
+      
+      spinner.succeed('Restore complete');
+      console.log(chalk.dim(`\n  Files:    ${result.filesRestored}`));
+      console.log(chalk.dim(`  Size:     ${formatBytes(result.bytesRestored)}`));
+      console.log(chalk.dim(`  Duration: ${(result.duration / 1000).toFixed(1)}s`));
+      console.log(chalk.dim(`  Target:   ${targetPath || snapshotData.sourcePath}`));
+      if (result.errors.length > 0) {
+        console.log(chalk.yellow(`  Errors:   ${result.errors.length}`));
+        for (const err of result.errors.slice(0, 3)) {
+          console.log(chalk.dim(`    - ${err}`));
+        }
+      }
+      console.log();
+    } catch (err: any) {
+      spinner.fail('Restore failed');
+      console.log(chalk.red(`\n  Error: ${err.message}\n`));
+      process.exit(1);
+    }
   });
 
 // ─────────────────────────────────────────────────────────────
@@ -324,15 +555,51 @@ program
   .command('status')
   .description('Show backup status')
   .action(async () => {
+    const { initDb, getStats, getSetting, getSnapshots } = await import('../core/db.js');
+    const { isEncryptionConfigured } = await import('../core/backup.js');
+    
+    initDb();
+    
+    const stats = getStats();
+    const snapshots = getSnapshots(1);
+    const sourcePathsJson = getSetting('sourcePaths');
+    const sourcePaths = sourcePathsJson ? JSON.parse(sourcePathsJson) : [DEFAULT_SOURCE];
+    const scheduleJson = getSetting('schedule');
+    const schedule = scheduleJson ? JSON.parse(scheduleJson) : null;
+    
     console.log(chalk.bold('\n📊 Backup Status\n'));
     
-    console.log(chalk.dim('  Source:      ') + DEFAULT_SOURCE);
-    console.log(chalk.dim('  Last backup: ') + 'Mar 3, 2026 7:45 PM');
-    console.log(chalk.dim('  Snapshots:   ') + '12');
-    console.log(chalk.dim('  Total size:  ') + '23.4 MB (deduplicated)');
-    console.log(chalk.dim('  Encryption:  ') + chalk.green('✓ Active'));
-    console.log(chalk.dim('  Schedule:    ') + 'Daily at 2:00 AM');
-    console.log(chalk.dim('  Next backup: ') + 'Mar 4, 2026 2:00 AM');
+    console.log(chalk.dim('  Source:      ') + sourcePaths[0]);
+    
+    if (snapshots.length > 0) {
+      const lastBackup = new Date(snapshots[0].timestamp).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+      console.log(chalk.dim('  Last backup: ') + lastBackup);
+    } else {
+      console.log(chalk.dim('  Last backup: ') + chalk.yellow('Never'));
+    }
+    
+    console.log(chalk.dim('  Snapshots:   ') + stats.totalSnapshots);
+    console.log(chalk.dim('  Total size:  ') + `${formatBytes(stats.totalBytes)} (${stats.totalChunks} chunks)`);
+    console.log(chalk.dim('  Deduplicated: ') + formatBytes(stats.deduplicatedBytes));
+    
+    if (isEncryptionConfigured()) {
+      console.log(chalk.dim('  Encryption:  ') + chalk.green('✓ Active'));
+    } else {
+      console.log(chalk.dim('  Encryption:  ') + chalk.yellow('Not configured'));
+    }
+    
+    if (schedule?.enabled) {
+      console.log(chalk.dim('  Schedule:    ') + schedule.cron);
+    } else {
+      console.log(chalk.dim('  Schedule:    ') + chalk.dim('Disabled'));
+    }
+    
     console.log();
   });
 

@@ -47,8 +47,47 @@ export function deriveKey(password: string, salt?: Buffer): KeyMaterial {
 
 /**
  * Encrypt data with XChaCha20-Poly1305
+ * Returns a single buffer: [nonce (24 bytes) | ciphertext (with MAC)]
  */
-export function encrypt(plaintext: Buffer, key: Buffer): EncryptedData {
+export function encrypt(plaintext: Buffer, key: Buffer): Buffer {
+  const nonce = Buffer.alloc(NONCE_BYTES);
+  sodium.randombytes_buf(nonce);
+
+  const ciphertext = Buffer.alloc(plaintext.length + MAC_BYTES);
+  sodium.crypto_secretbox_easy(ciphertext, plaintext, nonce, key);
+
+  // Combine nonce + ciphertext into single buffer for storage
+  return Buffer.concat([nonce, ciphertext]);
+}
+
+/**
+ * Decrypt data with XChaCha20-Poly1305
+ * Expects buffer format: [nonce (24 bytes) | ciphertext (with MAC)]
+ */
+export function decrypt(encrypted: Buffer, key: Buffer): Buffer {
+  const nonce = encrypted.subarray(0, NONCE_BYTES);
+  const ciphertext = encrypted.subarray(NONCE_BYTES);
+  
+  const plaintext = Buffer.alloc(ciphertext.length - MAC_BYTES);
+  
+  const success = sodium.crypto_secretbox_open_easy(
+    plaintext,
+    ciphertext,
+    nonce,
+    key
+  );
+
+  if (!success) {
+    throw new Error('Decryption failed - wrong password or corrupted data');
+  }
+
+  return plaintext;
+}
+
+/**
+ * Encrypt data and return structured object (for when you need nonce separately)
+ */
+export function encryptStructured(plaintext: Buffer, key: Buffer): EncryptedData {
   const nonce = Buffer.alloc(NONCE_BYTES);
   sodium.randombytes_buf(nonce);
 
@@ -59,9 +98,9 @@ export function encrypt(plaintext: Buffer, key: Buffer): EncryptedData {
 }
 
 /**
- * Decrypt data with XChaCha20-Poly1305
+ * Decrypt structured encrypted data
  */
-export function decrypt(encrypted: EncryptedData, key: Buffer): Buffer {
+export function decryptStructured(encrypted: EncryptedData, key: Buffer): Buffer {
   const plaintext = Buffer.alloc(encrypted.ciphertext.length - MAC_BYTES);
   
   const success = sodium.crypto_secretbox_open_easy(
@@ -83,8 +122,7 @@ export function decrypt(encrypted: EncryptedData, key: Buffer): Buffer {
  */
 export function createVerifier(key: Buffer): Buffer {
   const testData = Buffer.from('openclaw-backup-verification');
-  const { nonce, ciphertext } = encrypt(testData, key);
-  return Buffer.concat([nonce, ciphertext]);
+  return encrypt(testData, key);
 }
 
 /**
@@ -93,9 +131,7 @@ export function createVerifier(key: Buffer): Buffer {
 export function verifyPassword(password: string, salt: Buffer, verifier: Buffer): boolean {
   try {
     const { key } = deriveKey(password, salt);
-    const nonce = verifier.subarray(0, NONCE_BYTES);
-    const ciphertext = verifier.subarray(NONCE_BYTES);
-    const plaintext = decrypt({ nonce, ciphertext }, key);
+    const plaintext = decrypt(verifier, key);
     return plaintext.toString() === 'openclaw-backup-verification';
   } catch {
     return false;
