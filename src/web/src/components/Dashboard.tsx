@@ -1,15 +1,19 @@
 interface BackupStatus {
   running: boolean;
-  phase: 'idle' | 'scanning' | 'chunking' | 'encrypting' | 'uploading' | 'finalizing';
+  phase: 'idle' | 'scanning' | 'processing' | 'finalizing';
   lastRun: string | null;
   lastDuration: number | null;
   currentFile: string | null;
   filesScanned: number;
   filesTotal: number;
+  filesProcessed: number;
   chunksProcessed: number;
   chunksNew: number;
   chunksReused: number;
   bytesProcessed: number;
+  bytesStored: number;
+  encryptionConfigured: boolean;
+  errors: string[];
   stats?: {
     totalSnapshots: number;
     totalChunks: number;
@@ -74,13 +78,35 @@ export default function Dashboard({
       {/* Quick Actions */}
       <div className="card">
         <h2>Quick Actions</h2>
+        
+        {/* Encryption warning */}
+        {status && !status.encryptionConfigured && (
+          <div style={{
+            padding: '0.75rem',
+            background: 'rgba(243, 156, 18, 0.15)',
+            borderRadius: '8px',
+            marginBottom: '1rem',
+            fontSize: '0.875rem',
+          }}>
+            <span style={{ color: 'var(--warning)' }}>⚠️ Encryption not configured.</span>
+            <br />
+            <span style={{ color: 'var(--text-secondary)' }}>
+              Go to Settings → Encryption to set up.
+            </span>
+          </div>
+        )}
+        
         <div className="button-group" style={{ flexDirection: 'column' }}>
           {status?.running ? (
             <button className="secondary" onClick={onStop}>
               ⏹️ Stop Backup
             </button>
           ) : (
-            <button className="primary" onClick={onBackup}>
+            <button 
+              className="primary" 
+              onClick={onBackup}
+              disabled={!status?.encryptionConfigured}
+            >
               ▶️ Backup Now
             </button>
           )}
@@ -117,7 +143,9 @@ export default function Dashboard({
                 color: 'var(--accent)',
                 textTransform: 'uppercase',
               }}>
-                {status.phase}
+                {status.phase === 'scanning' ? '📂 Scanning' :
+                 status.phase === 'processing' ? '⚙️ Processing' :
+                 status.phase === 'finalizing' ? '✨ Finalizing' : status.phase}
               </span>
             </div>
             
@@ -138,17 +166,19 @@ export default function Dashboard({
             <div className="stats">
               <div className="stat">
                 <div className="stat-value">
-                  {status.filesScanned}/{status.filesTotal || '?'}
+                  {status.phase === 'scanning' 
+                    ? status.filesScanned 
+                    : `${status.filesProcessed}/${status.filesTotal}`}
                 </div>
                 <div className="stat-label">Files</div>
               </div>
               <div className="stat">
                 <div className="stat-value">{status.chunksNew}</div>
-                <div className="stat-label">New Chunks</div>
+                <div className="stat-label">New</div>
               </div>
               <div className="stat">
-                <div className="stat-value">{formatBytes(status.bytesProcessed)}</div>
-                <div className="stat-label">Processed</div>
+                <div className="stat-value">{status.chunksReused}</div>
+                <div className="stat-label">Reused</div>
               </div>
             </div>
             
@@ -156,12 +186,23 @@ export default function Dashboard({
               <div
                 className="progress-bar-fill"
                 style={{ 
-                  width: status.filesTotal 
-                    ? `${Math.round((status.filesScanned / status.filesTotal) * 100)}%` 
-                    : '0%' 
+                  width: status.phase === 'scanning' ? '10%' :
+                         status.filesTotal 
+                           ? `${Math.round((status.filesProcessed / status.filesTotal) * 100)}%` 
+                           : '0%' 
                 }}
               />
             </div>
+            
+            {status.errors.length > 0 && (
+              <p style={{ 
+                fontSize: '0.75rem', 
+                color: 'var(--warning)',
+                marginTop: '0.5rem',
+              }}>
+                ⚠️ {status.errors.length} error(s)
+              </p>
+            )}
           </>
         ) : status?.lastRun ? (
           <div className="stats">
@@ -184,6 +225,37 @@ export default function Dashboard({
           <p style={{ color: 'var(--text-secondary)' }}>No backups yet</p>
         )}
       </div>
+
+      {/* Storage Stats */}
+      {status?.stats && status.stats.totalSnapshots > 0 && (
+        <div className="card">
+          <h2>Storage</h2>
+          <div className="stats">
+            <div className="stat">
+              <div className="stat-value">{status.stats.totalSnapshots}</div>
+              <div className="stat-label">Snapshots</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">{status.stats.totalChunks}</div>
+              <div className="stat-label">Chunks</div>
+            </div>
+            <div className="stat">
+              <div className="stat-value">{formatBytes(status.stats.totalBytes)}</div>
+              <div className="stat-label">Stored</div>
+            </div>
+          </div>
+          {status.stats.deduplicatedBytes > 0 && (
+            <p style={{ 
+              fontSize: '0.75rem', 
+              color: 'var(--success)',
+              marginTop: '0.75rem',
+              textAlign: 'center',
+            }}>
+              💾 {formatBytes(status.stats.deduplicatedBytes)} saved via deduplication
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Snapshots */}
       <div className="card card-large">

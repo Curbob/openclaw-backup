@@ -6,16 +6,20 @@ import SettingsModal from './components/SettingsModal';
 
 interface BackupStatus {
   running: boolean;
-  phase: 'idle' | 'scanning' | 'chunking' | 'encrypting' | 'uploading' | 'finalizing';
+  phase: 'idle' | 'scanning' | 'processing' | 'finalizing';
   lastRun: string | null;
   lastDuration: number | null;
   currentFile: string | null;
   filesScanned: number;
   filesTotal: number;
+  filesProcessed: number;
   chunksProcessed: number;
   chunksNew: number;
   chunksReused: number;
   bytesProcessed: number;
+  bytesStored: number;
+  encryptionConfigured: boolean;
+  errors: string[];
   stats?: {
     totalSnapshots: number;
     totalChunks: number;
@@ -44,13 +48,16 @@ export default function App() {
   useEffect(() => {
     fetchStatus();
     fetchSnapshots();
-    
-    // Poll status every 2 seconds when backup is running
+  }, []);
+
+  // Poll status more frequently when backup is running
+  useEffect(() => {
     const interval = setInterval(() => {
+      fetchStatus();
       if (backupStatus?.running) {
-        fetchStatus();
+        // Poll faster during backup
       }
-    }, 2000);
+    }, backupStatus?.running ? 500 : 5000);
 
     return () => clearInterval(interval);
   }, [backupStatus?.running]);
@@ -77,8 +84,27 @@ export default function App() {
 
   async function startBackup() {
     try {
-      await fetch('/api/backup/start', { method: 'POST' });
+      const res = await fetch('/api/backup/start', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to start backup');
+        return;
+      }
       fetchStatus();
+      
+      // Poll until backup completes, then refresh snapshots
+      const pollUntilDone = setInterval(async () => {
+        const statusRes = await fetch('/api/backup/status');
+        const status = await statusRes.json();
+        if (!status.running) {
+          clearInterval(pollUntilDone);
+          fetchSnapshots();
+        }
+      }, 1000);
     } catch (err) {
       console.error('Failed to start backup:', err);
     }

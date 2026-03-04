@@ -58,6 +58,9 @@ const DEFAULTS: Settings = {
 function loadSettings(): Settings {
   const stored = getAllSettings();
   
+  // Check if encryption key is configured
+  const encryptionKeyConfigured = stored.encryptionKey !== undefined && stored.encryptionKey !== null;
+  
   return {
     sourcePaths: stored.sourcePaths 
       ? JSON.parse(stored.sourcePaths) 
@@ -69,8 +72,8 @@ function loadSettings(): Settings {
       ? JSON.parse(stored.schedule) 
       : DEFAULTS.schedule,
     encryption: {
-      enabled: stored.encryptionEnabled !== 'false',
-      keyConfigured: stored.encryptionKey !== undefined,
+      enabled: true, // Always true - encryption is mandatory
+      keyConfigured: encryptionKeyConfigured,
     },
     destinations: getDestinations().map(d => ({
       id: d.id,
@@ -154,18 +157,15 @@ settingsRoutes.post('/encryption/setup', async (req: Request, res: Response) => 
     return;
   }
 
-  // Derive key using Argon2id
+  // Use the real encryption initialization
   try {
-    const { deriveKey } = await import('../../core/crypto.js');
-    const { key, salt } = await deriveKey(password);
+    const { initEncryption } = await import('../../core/backup.js');
+    await initEncryption(password);
     
-    // Store salt (key is derived at runtime from password)
-    setSetting('encryptionSalt', salt.toString('base64'));
-    setSetting('encryptionEnabled', 'true');
-    
-    res.json({ message: 'Encryption configured' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to setup encryption' });
+    res.json({ message: 'Encryption configured successfully' });
+  } catch (err: any) {
+    console.error('Encryption setup failed:', err);
+    res.status(500).json({ error: err.message || 'Failed to setup encryption' });
   }
 });
 
