@@ -5,7 +5,9 @@ import { backupRoutes } from './routes/backup.js';
 import { restoreRoutes } from './routes/restore.js';
 import { snapshotRoutes } from './routes/snapshots.js';
 import { settingsRoutes } from './routes/settings.js';
+import { scheduleRoutes } from './routes/schedule.js';
 import { initDb, getStats } from '../core/db.js';
+import { startScheduler, getScheduleConfig } from '../core/scheduler.js';
 
 const DEFAULT_PORT = 11480;
 
@@ -24,6 +26,7 @@ export function createServer(): Express {
   app.use('/api/restore', restoreRoutes);
   app.use('/api/snapshots', snapshotRoutes);
   app.use('/api/settings', settingsRoutes);
+  app.use('/api/schedule', scheduleRoutes);
 
   // Health check
   app.get('/api/health', (_req, res) => {
@@ -46,10 +49,21 @@ export function createServer(): Express {
   return app;
 }
 
-export function startServer(port: number = DEFAULT_PORT): void {
+export function startServer(port: number = DEFAULT_PORT, enableScheduler = true): void {
   const app = createServer();
 
   app.listen(port, () => {
     console.log(`🦞 openclaw-backup server running at http://localhost:${port}`);
+    
+    // Start scheduler if enabled
+    if (enableScheduler) {
+      const config = getScheduleConfig();
+      if (config.enabled) {
+        const started = startScheduler();
+        if (started) {
+          console.log(`📅 Scheduler started: ${config.cron}`);
+        }
+      }
+    }
   });
 }

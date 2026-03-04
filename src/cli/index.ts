@@ -434,26 +434,99 @@ program
 program
   .command('schedule')
   .description('Manage backup schedule')
-  .argument('[action]', 'show, daily, hourly, weekly, disable')
-  .argument('[time]', 'Time for scheduled backup (e.g., 2am)')
+  .argument('[action]', 'show, enable, disable, daily, hourly, weekly')
+  .argument('[time]', 'Time for scheduled backup (e.g., 22:00)')
   .action(async (action, time) => {
+    const { initDb } = await import('../core/db.js');
+    const { getScheduleConfig, setScheduleConfig, getSchedulerState, startScheduler, stopScheduler } = await import('../core/scheduler.js');
+    
+    initDb();
+    
+    const state = getSchedulerState();
+    
     if (!action || action === 'show') {
       console.log(chalk.bold('\n📅 Backup Schedule\n'));
-      console.log(chalk.dim('  Status:    ') + chalk.green('Active'));
-      console.log(chalk.dim('  Frequency: ') + 'Daily');
-      console.log(chalk.dim('  Time:      ') + '2:00 AM');
-      console.log(chalk.dim('  Next run:  ') + 'Mar 4, 2026 2:00 AM');
+      
+      if (state.config.enabled) {
+        console.log(chalk.dim('  Status:    ') + (state.running ? chalk.green('Running') : chalk.yellow('Stopped')));
+        console.log(chalk.dim('  Cron:      ') + state.config.cron);
+        console.log(chalk.dim('  Timezone:  ') + state.config.timezone);
+        if (state.nextRun) {
+          console.log(chalk.dim('  Next run:  ') + new Date(state.nextRun).toLocaleString());
+        }
+        if (state.lastRun) {
+          const status = state.lastResult === 'success' ? chalk.green('✓') : chalk.red('✗');
+          console.log(chalk.dim('  Last run:  ') + new Date(state.lastRun).toLocaleString() + ' ' + status);
+        }
+      } else {
+        console.log(chalk.dim('  Status:    ') + chalk.yellow('Disabled'));
+        console.log(chalk.dim('\n  Enable with: openclaw-backup schedule daily 22:00'));
+      }
       console.log();
       return;
     }
 
     if (action === 'disable') {
+      setScheduleConfig({ enabled: false });
+      stopScheduler();
       console.log(chalk.yellow('\n⏸️  Scheduled backups disabled\n'));
       return;
     }
+    
+    if (action === 'enable') {
+      if (!state.config.enabled) {
+        setScheduleConfig({ enabled: true });
+      }
+      const started = startScheduler();
+      if (started) {
+        console.log(chalk.green('\n✅ Scheduler started\n'));
+      } else {
+        console.log(chalk.red('\n❌ Failed to start scheduler. Check encryption is configured.\n'));
+      }
+      return;
+    }
 
-    const scheduleTime = time || '2am';
-    console.log(chalk.green(`\n✅ Scheduled ${action} backups at ${scheduleTime}\n`));
+    // Parse time (default to 22:00)
+    let hour = 22;
+    let minute = 0;
+    if (time) {
+      const match = time.match(/^(\d{1,2}):?(\d{2})?$/);
+      if (match) {
+        hour = parseInt(match[1], 10);
+        minute = match[2] ? parseInt(match[2], 10) : 0;
+      }
+    }
+    
+    let cron = '';
+    switch (action) {
+      case 'hourly':
+        cron = '0 * * * *';
+        break;
+      case 'daily':
+        cron = `${minute} ${hour} * * *`;
+        break;
+      case 'weekly':
+        cron = `${minute} ${hour} * * 0`;
+        break;
+      default:
+        console.log(chalk.red(`\n❌ Unknown action: ${action}`));
+        console.log(chalk.dim('  Valid actions: show, enable, disable, daily, hourly, weekly\n'));
+        return;
+    }
+    
+    setScheduleConfig({ enabled: true, cron });
+    const started = startScheduler();
+    
+    if (started) {
+      const newState = getSchedulerState();
+      console.log(chalk.green(`\n✅ Scheduled ${action} backups at ${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`));
+      if (newState.nextRun) {
+        console.log(chalk.dim(`   Next backup: ${new Date(newState.nextRun).toLocaleString()}`));
+      }
+      console.log();
+    } else {
+      console.log(chalk.yellow(`\n⚠️  Schedule saved but scheduler not started. Make sure encryption is configured.\n`));
+    }
   });
 
 // ─────────────────────────────────────────────────────────────
