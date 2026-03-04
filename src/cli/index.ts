@@ -537,26 +537,170 @@ program
   .description('Manage remote storage')
   .argument('<action>', 'add, remove, list, test')
   .argument('[type]', 'gdrive, s3, b2, local')
-  .action(async (action, type) => {
+  .option('--client-id <id>', 'OAuth Client ID (for gdrive)')
+  .option('--client-secret <secret>', 'OAuth Client Secret (for gdrive)')
+  .action(async (action, type, options) => {
+    const { initDb, getDestinations } = await import('../core/db.js');
+    initDb();
+    
     if (action === 'list') {
+      const { isGDriveAuthenticated } = await import('../core/gdrive.js');
+      const destinations = getDestinations();
+      const gdriveAuth = await isGDriveAuthenticated();
+      
       console.log(chalk.bold('\n☁️  Remote Storage\n'));
-      console.log('  🔵 Google Drive    curbob@gmail.com    ' + chalk.green('✓ connected'));
-      console.log('  📁 Local           /Volumes/Backup     ' + chalk.green('✓ connected'));
+      
+      for (const dest of destinations) {
+        const icon = dest.type === 'gdrive' ? '🔵' : '📁';
+        const config = JSON.parse(dest.config);
+        const path = config.path || config.folderName || '';
+        const status = dest.type === 'gdrive' 
+          ? (gdriveAuth ? chalk.green('✓ connected') : chalk.yellow('○ not authenticated'))
+          : chalk.green('✓ local');
+        const primary = dest.primary ? chalk.cyan(' (primary)') : '';
+        
+        console.log(`  ${icon} ${dest.name.padEnd(16)} ${path.padEnd(20)} ${status}${primary}`);
+      }
+      
+      if (destinations.length === 0) {
+        console.log(chalk.dim('  No destinations configured'));
+      }
       console.log();
       return;
     }
 
-    if (action === 'add' && type) {
-      console.log(chalk.bold(`\n☁️  Add ${type} Remote\n`));
-      // TODO: OAuth flow for cloud providers
-      console.log(chalk.dim('  Starting authorization flow...\n'));
+    if (action === 'add') {
+      if (type === 'gdrive') {
+        const { getAuthUrl, startOAuthServer, isGDriveAuthenticated } = await import('../core/gdrive.js');
+        
+        // Check if already connected
+        if (await isGDriveAuthenticated()) {
+          const { reconnect } = await inquirer.prompt([{
+            type: 'confirm',
+            name: 'reconnect',
+            message: 'Google Drive is already connected. Reconnect?',
+            default: false,
+          }]);
+          if (!reconnect) return;
+        }
+        
+        // Get OAuth credentials
+        let clientId = options.clientId || process.env.GDRIVE_CLIENT_ID;
+        let clientSecret = options.clientSecret || process.env.GDRIVE_CLIENT_SECRET;
+        
+        if (!clientId || !clientSecret) {
+          console.log(chalk.bold('\n☁️  Connect Google Drive\n'));
+          console.log(chalk.dim('  You need OAuth credentials from Google Cloud Console.'));
+          console.log(chalk.dim('  Create credentials at: https://console.cloud.google.com/apis/credentials\n'));
+          
+          const creds = await inquirer.prompt([
+            {
+              type: 'input',
+              name: 'clientId',
+              message: 'Client ID:',
+              validate: (v: string) => v.length > 0 || 'Required',
+            },
+            {
+              type: 'password',
+              name: 'clientSecret',
+              message: 'Client Secret:',
+              mask: '•',
+              validate: (v: string) => v.length > 0 || 'Required',
+            },
+          ]);
+          clientId = creds.clientId;
+          clientSecret = creds.clientSecret;
+        }
+        
+        const config = { clientId, clientSecret };
+        const authUrl = getAuthUrl(config);
+        
+        console.log(chalk.bold('\n🔐 Authorization Required\n'));
+        console.log('  Open this URL in your browser:\n');
+        console.log(chalk.cyan(`  ${authUrl}\n`));
+        
+        // Start local server for callback
+        const spinner = ora('Waiting for authorization...').start();
+        
+        await new Promise<void>((resolve, reject) => {
+          const { close } = startOAuthServer(
+            config,
+            (tokens) => {
+              spinner.succeed('Google Drive connected!');
+              close();
+              resolve();
+            },
+            (error) => {
+              spinner.fail(`Authorization failed: ${error.message}`);
+              close();
+              reject(error);
+            }
+          );
+          
+          // Timeout after 5 minutes
+          setTimeout(() => {
+            spinner.fail('Authorization timed out');
+            close();
+            reject(new Error('Timeout'));
+          }, 5 * 60 * 1000);
+        });
+        
+        console.log(chalk.green('\n✅ Google Drive is now connected!'));
+        console.log(chalk.dim('   Chunks will be stored in: OpenClaw-Backups folder\n'));
+        return;
+      }
+      
+      if (type === 'local') {
+        const { dest } = await inquirer.prompt([{
+          type: 'input',
+          name: 'dest',
+          message: 'Backup directory path:',
+          default: join(homedir(), 'OpenClaw-Backups'),
+        }]);
+        
+        console.log(chalk.green(`\n✅ Local storage configured: ${dest}\n`));
+        return;
+      }
+      
+      console.log(chalk.yellow(`\n⚠️  Unknown remote type: ${type}`));
+      console.log(chalk.dim('   Supported: gdrive, local\n'));
+      return;
+    }
+
+    if (action === 'remove') {
+      if (type === 'gdrive') {
+        const { disconnectGDrive } = await import('../core/gdrive.js');
+        await disconnectGDrive();
+        console.log(chalk.yellow('\n🔌 Google Drive disconnected\n'));
+        return;
+      }
+      console.log(chalk.dim('\nSpecify remote type to remove: openclaw-backup remote remove gdrive\n'));
       return;
     }
 
     if (action === 'test') {
       const spinner = ora('Testing remote connection...').start();
-      await new Promise(r => setTimeout(r, 1000));
-      spinner.succeed('Remote connection OK');
+      
+      try {
+        if (type === 'gdrive') {
+          const { GoogleDriveStorage, isGDriveAuthenticated } = await import('../core/gdrive.js');
+          
+          if (!await isGDriveAuthenticated()) {
+            spinner.fail('Google Drive not authenticated. Run: openclaw-backup remote add gdrive');
+            return;
+          }
+          
+          const storage = new GoogleDriveStorage();
+          await storage.init();
+          const stats = await storage.stats();
+          
+          spinner.succeed(`Google Drive OK - ${stats.chunks} chunks, ${formatBytes(stats.bytes)}`);
+        } else {
+          spinner.succeed('Remote connection OK');
+        }
+      } catch (err: any) {
+        spinner.fail(`Connection failed: ${err.message}`);
+      }
       console.log();
     }
   });

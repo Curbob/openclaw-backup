@@ -70,7 +70,7 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
   }
   
   const config = JSON.parse(destination.config);
-  const storage = createStorage(destination.type, config);
+  const storage = await createStorage(destination.type, config);
   await storage.init();
 
   // Progress tracking
@@ -312,7 +312,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
   }
   
   const config = JSON.parse(destination.config);
-  const storage = createStorage(destination.type, config);
+  const storage = await createStorage(destination.type, config);
 
   // Get files from snapshot
   let files = getFilesForSnapshot(options.snapshotId);

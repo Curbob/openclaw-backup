@@ -125,14 +125,17 @@ export class LocalStorage implements StorageBackend {
 /**
  * Create storage backend from destination config
  */
-export function createStorage(type: string, config: any): StorageBackend {
+export async function createStorage(type: string, config: any): Promise<StorageBackend> {
   switch (type) {
     case 'local':
       return new LocalStorage(config.path);
     
+    case 'gdrive': {
+      const { GoogleDriveStorage } = await import('./gdrive.js');
+      return new GoogleDriveStorage(config);
+    }
+    
     // TODO: Add more backends
-    // case 'gdrive':
-    //   return new GoogleDriveStorage(config);
     // case 's3':
     //   return new S3Storage(config);
     
