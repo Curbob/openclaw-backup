@@ -108,8 +108,10 @@ export async function chunkFile(filePath: string): Promise<Chunk[]> {
 
     const stream = createReadStream(filePath, { highWaterMark: MAX_CHUNK * 2 });
 
-    stream.on('data', (data: Buffer) => {
-      buffer = Buffer.concat([buffer, data]);
+    stream.on('data', (data: Buffer | string) => {
+      // Ensure we're working with a Buffer
+      const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      buffer = Buffer.concat([buffer, chunk]);
 
       while (buffer.length >= MAX_CHUNK) {
         const boundary = findBoundary(buffer, 0, buffer.length);

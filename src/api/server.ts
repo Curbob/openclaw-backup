@@ -37,7 +37,7 @@ export function createServer(): Express {
   });
 
   // Serve static frontend in production
-  const webDir = path.join(import.meta.dirname, '../../web/dist');
+  const webDir = path.join(import.meta.dirname, '../web');
   app.use(express.static(webDir));
   app.get('*', (_req, res) => {
     res.sendFile(path.join(webDir, 'index.html'));
