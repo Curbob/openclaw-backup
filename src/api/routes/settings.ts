@@ -169,6 +169,29 @@ settingsRoutes.post('/encryption/setup', async (req: Request, res: Response) => 
   }
 });
 
+// GET /api/settings/export-key
+// Downloads the encryption key and salt for backup
+settingsRoutes.get('/export-key', (_req: Request, res: Response) => {
+  const encryptionKey = getSetting('encryptionKey');
+  const encryptionSalt = getSetting('encryptionSalt');
+  
+  if (!encryptionKey || !encryptionSalt) {
+    res.status(400).json({ error: 'Encryption not configured' });
+    return;
+  }
+
+  const exportData = {
+    warning: '⚠️ KEEP THIS FILE SAFE! Store it separately from your backups. Without this key, your backups are UNRECOVERABLE.',
+    exportedAt: new Date().toISOString(),
+    encryptionKey,
+    encryptionSalt,
+  };
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', 'attachment; filename="openclaw-backup-key.json"');
+  res.send(JSON.stringify(exportData, null, 2));
+});
+
 // POST /api/settings/test-destination
 settingsRoutes.post('/test-destination', async (req: Request, res: Response) => {
   const { destinationId } = req.body;

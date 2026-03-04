@@ -202,20 +202,63 @@ export default function SettingsModal({ onClose }: Props) {
         {activeTab === 'encryption' && (
           <>
             {settings.encryption.keyConfigured ? (
-              <div
-                style={{
-                  padding: '1rem',
-                  background: 'rgba(46, 204, 113, 0.1)',
-                  borderRadius: '8px',
-                }}
-              >
-                <p style={{ color: 'var(--success)' }}>
-                  🔒 Encryption is configured and active
-                </p>
-                <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-                  All backups are encrypted with XChaCha20-Poly1305
-                </p>
-              </div>
+              <>
+                <div
+                  style={{
+                    padding: '1rem',
+                    background: 'rgba(46, 204, 113, 0.1)',
+                    borderRadius: '8px',
+                  }}
+                >
+                  <p style={{ color: 'var(--success)' }}>
+                    🔒 Encryption is configured and active
+                  </p>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                    All backups are encrypted with XChaCha20-Poly1305
+                  </p>
+                </div>
+                
+                {/* Export Key Section */}
+                <div
+                  style={{
+                    marginTop: '1.5rem',
+                    padding: '1rem',
+                    background: 'rgba(231, 76, 60, 0.1)',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(231, 76, 60, 0.3)',
+                  }}
+                >
+                  <h4 style={{ margin: '0 0 0.5rem 0', color: 'var(--warning)' }}>
+                    🔑 Backup Your Encryption Key
+                  </h4>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0 0 1rem 0' }}>
+                    <strong>⚠️ IMPORTANT:</strong> Without this key, your backups are <strong>UNRECOVERABLE</strong>.
+                    Save it somewhere safe — but <strong>NOT</strong> on the same drive as your backups!
+                  </p>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0 0 1rem 0' }}>
+                    Good places: Password manager, printed paper in a safe, encrypted USB drive, different cloud service.
+                  </p>
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      if (confirm(
+                        '⚠️ IMPORTANT: Save this key somewhere DIFFERENT from your backups!\n\n' +
+                        'Good: Password manager, printed paper, different cloud\n' +
+                        'Bad: Same folder as backups, same Google Drive\n\n' +
+                        'Continue with download?'
+                      )) {
+                        window.location.href = '/api/settings/export-key';
+                      }
+                    }}
+                    style={{ 
+                      background: 'rgba(231, 76, 60, 0.2)',
+                      borderColor: 'rgba(231, 76, 60, 0.5)',
+                    }}
+                  >
+                    📥 Export Encryption Key
+                  </button>
+                </div>
+              </>
             ) : encryptionSuccess ? (
               <div
                 style={{

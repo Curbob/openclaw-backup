@@ -544,6 +544,60 @@ program
   });
 
 // ─────────────────────────────────────────────────────────────
+// Key - Export encryption key for backup
+// ─────────────────────────────────────────────────────────────
+program
+  .command('key')
+  .description('Export encryption key for safekeeping')
+  .argument('<action>', 'export')
+  .option('-o, --output <path>', 'Output file path')
+  .action(async (action, options) => {
+    const { initDb, getSetting } = await import('../core/db.js');
+    initDb();
+    
+    if (action !== 'export') {
+      console.log(chalk.red(`\n❌ Unknown action: ${action}`));
+      console.log(chalk.dim('   Usage: openclaw-backup key export [-o path]\n'));
+      return;
+    }
+    
+    const encryptionKey = getSetting('encryptionKey');
+    const encryptionSalt = getSetting('encryptionSalt');
+    
+    if (!encryptionKey || !encryptionSalt) {
+      console.log(chalk.red('\n❌ Encryption not configured. Run init first.\n'));
+      process.exit(1);
+    }
+    
+    console.log(chalk.bold.yellow('\n⚠️  IMPORTANT: Keep this key safe!\n'));
+    console.log(chalk.yellow('   • Store it somewhere DIFFERENT from your backups'));
+    console.log(chalk.yellow('   • Without this key, your backups are UNRECOVERABLE'));
+    console.log(chalk.yellow('   • Good: Password manager, printed paper, different cloud'));
+    console.log(chalk.yellow('   • Bad: Same drive as backups, same Google Drive\n'));
+    
+    const exportData = {
+      warning: 'KEEP THIS FILE SAFE! Without this key, your backups are UNRECOVERABLE.',
+      exportedAt: new Date().toISOString(),
+      encryptionKey,
+      encryptionSalt,
+    };
+    
+    if (options.output) {
+      const { writeFileSync } = await import('fs');
+      const { resolve } = await import('path');
+      const outPath = resolve(options.output.replace('~', homedir()));
+      writeFileSync(outPath, JSON.stringify(exportData, null, 2), { mode: 0o600 });
+      console.log(chalk.green(`✅ Key exported to: ${outPath}\n`));
+    } else {
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log(chalk.cyan('Encryption Key: ') + encryptionKey);
+      console.log(chalk.cyan('Encryption Salt: ') + encryptionSalt);
+      console.log(chalk.dim('─'.repeat(50)));
+      console.log(chalk.dim('\nTip: Use -o <path> to save to a file\n'));
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────
 // Remote - Manage cloud storage
 // ─────────────────────────────────────────────────────────────
 program
