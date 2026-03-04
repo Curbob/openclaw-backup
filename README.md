@@ -132,6 +132,49 @@ Backups are stored in an `OpenClaw-Backups` folder in your Drive root.
 
 On restore, the process reverses: read chunks → decrypt → reassemble files.
 
+## Disaster Recovery
+
+This tool backs up your **OpenClaw workspace** (personality, memories, skills, projects) — not OpenClaw itself. Think of it like backing up your documents, not the application.
+
+**To restore on a fresh machine:**
+
+```bash
+# 1. Install the tools
+npm install -g openclaw
+npm install -g openclaw-backup   # or clone this repo
+
+# 2. Copy your encryption key from secure storage
+mkdir -p ~/.config/openclaw-backup
+cp /path/to/your/backup/encryption.key ~/.config/openclaw-backup/
+
+# 3. If using Google Drive, re-authenticate
+openclaw-backup remote add gdrive
+
+# 4. Restore your workspace
+openclaw-backup restore <snapshot-id> ~/clawd
+
+# 5. Restore OpenClaw config (if you backed it up separately)
+cp /path/to/your/backup/openclaw-config.yaml ~/.config/openclaw/config.yaml
+
+# 6. Start OpenClaw
+openclaw gateway start
+```
+
+Your agent wakes up with all its memories, personality, and projects intact.
+
+**What gets restored:**
+- AGENTS.md, SOUL.md, USER.md, TOOLS.md — agent personality & behavior
+- memory/ — daily logs, context, learned patterns
+- skills/ — custom skills
+- All your projects and files
+
+**What you need separately:**
+- OpenClaw installation (`npm install -g openclaw`)
+- OpenClaw config with API keys (`~/.config/openclaw/config.yaml`)
+- Your encryption key (`~/.config/openclaw-backup/encryption.key`)
+
+💡 **Tip:** Store your encryption key and OpenClaw config in a password manager or secure location outside your workspace.
+
 ## Security
 
 - **Encryption**: XChaCha20-Poly1305 (libsodium via sodium-native)
