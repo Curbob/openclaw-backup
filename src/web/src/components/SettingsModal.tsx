@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface Destination {
   id: string;
@@ -291,34 +291,7 @@ export default function SettingsModal({ onClose }: Props) {
 
         {/* Destinations Tab */}
         {activeTab === 'destinations' && (
-          <>
-            <ul className="snapshot-list">
-              {settings.destinations.map((dest) => (
-                <li key={dest.id} className="snapshot-item">
-                  <div className="snapshot-info">
-                    <span className="snapshot-date">
-                      {dest.name} {dest.primary && '⭐'}
-                    </span>
-                    <span className="snapshot-meta">
-                      {dest.type} • {dest.path}
-                    </span>
-                  </div>
-                  <div className="snapshot-actions">
-                    <button className="secondary" style={{ fontSize: '0.75rem' }}>
-                      Test
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-            <button
-              className="secondary"
-              style={{ marginTop: '1rem', width: '100%' }}
-            >
-              + Add Destination
-            </button>
-          </>
+          <DestinationsTab destinations={settings.destinations} onRefresh={fetchSettings} />
         )}
 
         <div className="button-group" style={{ marginTop: '1.5rem' }}>
@@ -331,5 +304,325 @@ export default function SettingsModal({ onClose }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Destinations Tab Component
+// ─────────────────────────────────────────────────────────────
+
+interface DestinationsTabProps {
+  destinations: Destination[];
+  onRefresh: () => void;
+}
+
+interface GDriveStatus {
+  connected: boolean;
+  configured: boolean;
+  stats?: { chunks: number; bytes: number };
+  error?: string;
+}
+
+function DestinationsTab({ destinations, onRefresh }: DestinationsTabProps) {
+  const [showGDriveSetup, setShowGDriveSetup] = useState(false);
+  const [gdriveStatus, setGdriveStatus] = useState<GDriveStatus | null>(null);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [authUrl, setAuthUrl] = useState('');
+  const [authCode, setAuthCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState<'credentials' | 'authorize' | 'complete'>('credentials');
+
+  useEffect(() => {
+    fetchGDriveStatus();
+  }, []);
+
+  async function fetchGDriveStatus() {
+    try {
+      const res = await fetch('/api/gdrive/status');
+      const data = await res.json() as GDriveStatus;
+      setGdriveStatus(data);
+      
+      if (data.configured && !data.connected) {
+        setStep('authorize');
+      } else if (data.connected) {
+        setStep('complete');
+      }
+    } catch (err) {
+      console.error('Failed to fetch GDrive status:', err);
+    }
+  }
+
+  async function saveCredentials() {
+    if (!clientId || !clientSecret) {
+      alert('Please enter both Client ID and Client Secret');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await fetch('/api/gdrive/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, clientSecret }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to save credentials');
+        return;
+      }
+      
+      setAuthUrl(data.authUrl);
+      setStep('authorize');
+    } catch (err) {
+      alert('Failed to save credentials');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitAuthCode() {
+    if (!authCode) {
+      alert('Please enter the authorization code');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await fetch('/api/gdrive/callback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: authCode }),
+      });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Authorization failed');
+        return;
+      }
+      
+      setStep('complete');
+      fetchGDriveStatus();
+      onRefresh();
+    } catch (err) {
+      alert('Authorization failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function disconnectGDrive() {
+    if (!confirm('Disconnect Google Drive?')) return;
+    
+    try {
+      await fetch('/api/gdrive/disconnect', { method: 'POST' });
+      setGdriveStatus({ connected: false, configured: false });
+      setStep('credentials');
+      setAuthUrl('');
+      setAuthCode('');
+      onRefresh();
+    } catch (err) {
+      alert('Failed to disconnect');
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  }
+
+  return (
+    <>
+      {/* Local destinations */}
+      <ul className="snapshot-list">
+        {destinations.map((dest) => (
+          <li key={dest.id} className="snapshot-item">
+            <div className="snapshot-info">
+              <span className="snapshot-date">
+                {dest.type === 'local' ? '📁' : '☁️'} {dest.name} {dest.primary && '⭐'}
+              </span>
+              <span className="snapshot-meta">
+                {dest.type} • {dest.path}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {/* Google Drive Section */}
+      <div style={{ 
+        marginTop: '1.5rem', 
+        padding: '1rem',
+        background: 'var(--bg-tertiary)',
+        borderRadius: '8px',
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center',
+          marginBottom: '1rem',
+        }}>
+          <h3 style={{ margin: 0, fontSize: '0.9375rem' }}>
+            🔵 Google Drive
+          </h3>
+          {gdriveStatus?.connected && (
+            <span style={{ 
+              color: 'var(--success)', 
+              fontSize: '0.8125rem' 
+            }}>
+              ✓ Connected
+            </span>
+          )}
+        </div>
+
+        {gdriveStatus?.connected ? (
+          <>
+            {gdriveStatus.stats && (
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0 0 1rem 0' }}>
+                {gdriveStatus.stats.chunks} chunks • {formatBytes(gdriveStatus.stats.bytes)}
+              </p>
+            )}
+            <button 
+              className="secondary" 
+              onClick={disconnectGDrive}
+              style={{ fontSize: '0.8125rem' }}
+            >
+              Disconnect
+            </button>
+          </>
+        ) : showGDriveSetup ? (
+          <div>
+            {step === 'credentials' && (
+              <>
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                  Create OAuth credentials at{' '}
+                  <a 
+                    href="https://console.cloud.google.com/apis/credentials" 
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--accent)' }}
+                  >
+                    Google Cloud Console
+                  </a>
+                </p>
+                
+                <div className="form-group">
+                  <label>Client ID</label>
+                  <input
+                    type="text"
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    placeholder="xxxxx.apps.googleusercontent.com"
+                  />
+                </div>
+                
+                <div className="form-group">
+                  <label>Client Secret</label>
+                  <input
+                    type="password"
+                    value={clientSecret}
+                    onChange={(e) => setClientSecret(e.target.value)}
+                    placeholder="GOCSPX-xxxxx"
+                  />
+                </div>
+                
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button 
+                    className="secondary" 
+                    onClick={() => setShowGDriveSetup(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="primary" 
+                    onClick={saveCredentials}
+                    disabled={loading || !clientId || !clientSecret}
+                  >
+                    {loading ? 'Saving...' : 'Next'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 'authorize' && (
+              <>
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                  1. Click the button below to authorize<br />
+                  2. Copy the authorization code<br />
+                  3. Paste it here
+                </p>
+                
+                <a
+                  href={authUrl || '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-block',
+                    padding: '0.5rem 1rem',
+                    background: 'var(--accent)',
+                    color: 'white',
+                    borderRadius: '6px',
+                    textDecoration: 'none',
+                    fontSize: '0.875rem',
+                    marginBottom: '1rem',
+                  }}
+                  onClick={async () => {
+                    if (!authUrl) {
+                      const res = await fetch('/api/gdrive/auth-url');
+                      const data = await res.json();
+                      setAuthUrl(data.authUrl);
+                      window.open(data.authUrl, '_blank');
+                    }
+                  }}
+                >
+                  Open Google Authorization
+                </a>
+                
+                <div className="form-group">
+                  <label>Authorization Code</label>
+                  <input
+                    type="text"
+                    value={authCode}
+                    onChange={(e) => setAuthCode(e.target.value)}
+                    placeholder="4/0AXxxxxx..."
+                  />
+                </div>
+                
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button 
+                    className="secondary" 
+                    onClick={() => {
+                      setStep('credentials');
+                      setShowGDriveSetup(false);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="primary" 
+                    onClick={submitAuthCode}
+                    disabled={loading || !authCode}
+                  >
+                    {loading ? 'Connecting...' : 'Connect'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <button 
+            className="secondary" 
+            onClick={() => setShowGDriveSetup(true)}
+            style={{ width: '100%' }}
+          >
+            + Connect Google Drive
+          </button>
+        )}
+      </div>
+    </>
   );
 }
