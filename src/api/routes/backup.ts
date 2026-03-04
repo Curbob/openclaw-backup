@@ -27,7 +27,9 @@ interface BackupStatus {
   chunksNew: number;
   chunksReused: number;
   bytesProcessed: number;
+  bytesCompressed: number;
   bytesStored: number;
+  compressionRatio: number;
   errors: string[];
   startedAt: string | null;
 }
@@ -46,7 +48,9 @@ let backupStatus: BackupStatus = {
   chunksNew: 0,
   chunksReused: 0,
   bytesProcessed: 0,
+  bytesCompressed: 0,
   bytesStored: 0,
+  compressionRatio: 1,
   errors: [],
   startedAt: null,
 };
@@ -119,7 +123,9 @@ backupRoutes.post('/start', async (req: Request, res: Response) => {
     chunksNew: 0,
     chunksReused: 0,
     bytesProcessed: 0,
+    bytesCompressed: 0,
     bytesStored: 0,
+    compressionRatio: 1,
     errors: [],
     startedAt: new Date().toISOString(),
   };
@@ -173,7 +179,9 @@ async function runBackupAsync(
         backupStatus.chunksNew = progress.chunksNew;
         backupStatus.chunksReused = progress.chunksReused;
         backupStatus.bytesProcessed = progress.bytesProcessed;
+        backupStatus.bytesCompressed = progress.bytesCompressed;
         backupStatus.bytesStored = progress.bytesStored;
+        backupStatus.compressionRatio = progress.compressionRatio;
         backupStatus.errors = progress.errors;
       },
     });

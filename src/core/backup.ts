@@ -5,6 +5,7 @@
 import { scanDirectory, readFileContent, hashContent, FileInfo, ScanOptions } from './scanner.js';
 import { chunkBuffer } from './chunker.js';
 import { encrypt, decrypt, deriveKey } from './crypto.js';
+import { compress, decompress } from './compress.js';
 import { createStorage, StorageBackend } from './storage.js';
 import { 
   createSnapshot, 
@@ -27,7 +28,9 @@ export interface BackupProgress {
   chunksNew: number;
   chunksReused: number;
   bytesProcessed: number;
+  bytesCompressed: number;
   bytesStored: number;
+  compressionRatio: number;
   errors: string[];
 }
 
@@ -44,7 +47,9 @@ export interface BackupResult {
   chunksNew: number;
   chunksReused: number;
   bytesProcessed: number;
+  bytesCompressed: number;
   bytesStored: number;
+  compressionRatio: number;
   deduplicatedBytes: number;
   duration: number;
   errors: string[];
@@ -83,7 +88,9 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
     chunksNew: 0,
     chunksReused: 0,
     bytesProcessed: 0,
+    bytesCompressed: 0,
     bytesStored: 0,
+    compressionRatio: 1,
     errors: [],
   };
 
@@ -140,15 +147,18 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
           upsertChunk({
             hash,
             size: chunk.size,
-            compressedSize: chunk.size, // TODO: Add compression
+            compressedSize: chunk.size,
             refCount: 1,
             destinationId: destination.id,
           });
           progress.chunksReused++;
           deduplicatedBytes += chunk.size;
         } else {
-          // New chunk - encrypt and store
-          const encrypted = encrypt(chunk.data, encryptionKey);
+          // New chunk - compress, then encrypt, then store
+          const compressed = await compress(chunk.data);
+          progress.bytesCompressed += compressed.compressedSize;
+          
+          const encrypted = encrypt(compressed.data, encryptionKey);
           await storage.write(hash, encrypted);
           
           upsertChunk({
@@ -166,6 +176,13 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
 
       fileChunks.set(file.path, chunkHashes);
       progress.filesProcessed++;
+      
+      // Update compression ratio
+      if (progress.bytesProcessed > 0) {
+        const compressedTotal = progress.bytesCompressed + deduplicatedBytes;
+        progress.compressionRatio = compressedTotal / progress.bytesProcessed;
+      }
+      
       emitProgress();
 
     } catch (err: any) {
@@ -216,7 +233,9 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
     chunksNew: progress.chunksNew,
     chunksReused: progress.chunksReused,
     bytesProcessed: progress.bytesProcessed,
+    bytesCompressed: progress.bytesCompressed,
     bytesStored: totalBytesStored,
+    compressionRatio: progress.compressionRatio,
     deduplicatedBytes,
     duration: Date.now() - startTime,
     errors,
@@ -360,8 +379,11 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
         const encryptedChunk = await storage.read(hash);
         
         progress.phase = 'decrypting';
-        const decryptedChunk = await decrypt(encryptedChunk, encryptionKey);
-        chunks.push(decryptedChunk);
+        const decryptedChunk = decrypt(encryptedChunk, encryptionKey);
+        
+        // Decompress if the chunk was compressed
+        const originalChunk = await decompress(decryptedChunk);
+        chunks.push(originalChunk);
       }
 
       const content = Buffer.concat(chunks);

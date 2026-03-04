@@ -229,6 +229,7 @@ program
       console.log(chalk.dim(`  Files:       ${result.filesProcessed}`));
       console.log(chalk.dim(`  New chunks:  ${result.chunksNew} (${formatBytes(result.bytesStored)})`));
       console.log(chalk.dim(`  Reused:      ${result.chunksReused} chunks`));
+      console.log(chalk.dim(`  Compression: ${((1 - result.compressionRatio) * 100).toFixed(0)}% saved`));
       console.log(chalk.dim(`  Deduplicated: ${formatBytes(result.deduplicatedBytes)}`));
       console.log(chalk.dim(`  Duration:    ${(result.duration / 1000).toFixed(1)}s`));
       if (options.label) {
