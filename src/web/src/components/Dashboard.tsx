@@ -1,9 +1,21 @@
 interface BackupStatus {
   running: boolean;
+  phase: 'idle' | 'scanning' | 'chunking' | 'encrypting' | 'uploading' | 'finalizing';
   lastRun: string | null;
   lastDuration: number | null;
+  currentFile: string | null;
+  filesScanned: number;
+  filesTotal: number;
   chunksProcessed: number;
+  chunksNew: number;
+  chunksReused: number;
   bytesProcessed: number;
+  stats?: {
+    totalSnapshots: number;
+    totalChunks: number;
+    totalBytes: number;
+    deduplicatedBytes: number;
+  };
 }
 
 interface Snapshot {
@@ -72,6 +84,13 @@ export default function Dashboard({
               ▶️ Backup Now
             </button>
           )}
+          <button 
+            className="secondary" 
+            onClick={() => snapshots[0] && onRestore(snapshots[0])}
+            disabled={snapshots.length === 0}
+          >
+            🔄 Restore Latest
+          </button>
           <button className="secondary" onClick={onSchedule}>
             📅 Schedule
           </button>
@@ -83,8 +102,68 @@ export default function Dashboard({
 
       {/* Status */}
       <div className="card">
-        <h2>Last Backup</h2>
-        {status?.lastRun ? (
+        <h2>{status?.running ? 'Backup Progress' : 'Last Backup'}</h2>
+        
+        {status?.running ? (
+          <>
+            <div style={{ marginBottom: '1rem' }}>
+              <span style={{ 
+                display: 'inline-block',
+                padding: '0.25rem 0.5rem',
+                background: 'rgba(230, 57, 70, 0.15)',
+                borderRadius: '4px',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                color: 'var(--accent)',
+                textTransform: 'uppercase',
+              }}>
+                {status.phase}
+              </span>
+            </div>
+            
+            {status.currentFile && (
+              <p style={{ 
+                fontSize: '0.8125rem', 
+                color: 'var(--text-secondary)',
+                marginBottom: '0.5rem',
+                fontFamily: 'monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {status.currentFile}
+              </p>
+            )}
+            
+            <div className="stats">
+              <div className="stat">
+                <div className="stat-value">
+                  {status.filesScanned}/{status.filesTotal || '?'}
+                </div>
+                <div className="stat-label">Files</div>
+              </div>
+              <div className="stat">
+                <div className="stat-value">{status.chunksNew}</div>
+                <div className="stat-label">New Chunks</div>
+              </div>
+              <div className="stat">
+                <div className="stat-value">{formatBytes(status.bytesProcessed)}</div>
+                <div className="stat-label">Processed</div>
+              </div>
+            </div>
+            
+            <div className="progress-bar">
+              <div
+                className="progress-bar-fill"
+                style={{ 
+                  width: status.filesTotal 
+                    ? `${Math.round((status.filesScanned / status.filesTotal) * 100)}%` 
+                    : '0%' 
+                }}
+              />
+            </div>
+          </>
+        ) : status?.lastRun ? (
           <div className="stats">
             <div className="stat">
               <div className="stat-value">{status.chunksProcessed}</div>
@@ -103,15 +182,6 @@ export default function Dashboard({
           </div>
         ) : (
           <p style={{ color: 'var(--text-secondary)' }}>No backups yet</p>
-        )}
-
-        {status?.running && (
-          <div className="progress-bar">
-            <div
-              className="progress-bar-fill"
-              style={{ width: '45%' }} // TODO: Calculate real progress
-            />
-          </div>
         )}
       </div>
 

@@ -6,10 +6,22 @@ import SettingsModal from './components/SettingsModal';
 
 interface BackupStatus {
   running: boolean;
+  phase: 'idle' | 'scanning' | 'chunking' | 'encrypting' | 'uploading' | 'finalizing';
   lastRun: string | null;
   lastDuration: number | null;
+  currentFile: string | null;
+  filesScanned: number;
+  filesTotal: number;
   chunksProcessed: number;
+  chunksNew: number;
+  chunksReused: number;
   bytesProcessed: number;
+  stats?: {
+    totalSnapshots: number;
+    totalChunks: number;
+    totalBytes: number;
+    deduplicatedBytes: number;
+  };
 }
 
 interface Snapshot {

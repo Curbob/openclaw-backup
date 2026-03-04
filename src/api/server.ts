@@ -5,10 +5,14 @@ import { backupRoutes } from './routes/backup.js';
 import { restoreRoutes } from './routes/restore.js';
 import { snapshotRoutes } from './routes/snapshots.js';
 import { settingsRoutes } from './routes/settings.js';
+import { initDb, getStats } from '../core/db.js';
 
 const DEFAULT_PORT = 11480;
 
 export function createServer(): Express {
+  // Initialize database on server start
+  initDb();
+  
   const app = express();
 
   // Middleware
@@ -24,6 +28,12 @@ export function createServer(): Express {
   // Health check
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', version: '0.1.0' });
+  });
+
+  // Stats endpoint
+  app.get('/api/stats', (_req, res) => {
+    const stats = getStats();
+    res.json(stats);
   });
 
   // Serve static frontend in production
