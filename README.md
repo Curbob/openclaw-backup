@@ -1,98 +1,178 @@
-# OpenClaw Backup
+# openclaw-backup
 
-Open-source, cross-platform encrypted backup system for OpenClaw workspaces.
+Encrypted, incremental backup tool for OpenClaw workspaces. Local-first with optional cloud sync.
 
 ## Features
 
-- 🔐 **Encrypted** — AES-256 / XChaCha20-Poly1305 encryption
-- 📦 **Incremental** — Content-defined chunking with deduplication
-- ☁️ **Cloud Storage** — Google Drive, S3, Backblaze B2, or local
-- 🖥️ **Cross-Platform** — Mac, Linux, Windows
-- ⏰ **Scheduled** — Automatic backups with retention policies
-- 🎯 **Selective Restore** — Browse snapshots and restore specific files
+- **Encrypted at rest** — XChaCha20-Poly1305 + Argon2id key derivation
+- **Incremental backups** — Content-defined chunking (FastCDC) with SHA-256 deduplication
+- **Multiple destinations** — Local storage + Google Drive (more coming)
+- **Scheduled backups** — Built-in cron-style scheduler
+- **Web UI** — Dashboard at `http://localhost:11480`
+- **Cross-platform** — Mac, Linux, Windows
 
 ## Quick Start
 
 ```bash
-# Install
-npm install -g openclaw-backup
+# Clone and install
+git clone https://github.com/curbob/openclaw-backup.git
+cd openclaw-backup
+npm install
+npm run build
 
-# Initialize (set password & destination)
-openclaw-backup init
+# Initialize (creates config + encryption key)
+node dist/cli/index.js init
 
-# Create a backup
-openclaw-backup backup
+# Run your first backup
+node dist/cli/index.js backup
 
 # List snapshots
-openclaw-backup list
+node dist/cli/index.js list
 
-# Restore
-openclaw-backup restore latest
-openclaw-backup restore snap_001 --to /path/to/restore
+# Restore to a directory
+node dist/cli/index.js restore <snapshot-id> ./restore-test
 ```
 
-## Schedule Backups
+## Installation
+
+### From Source
 
 ```bash
-# Daily at 2 AM
-openclaw-backup schedule daily 2am
-
-# View schedule
-openclaw-backup schedule show
-
-# Disable
-openclaw-backup schedule disable
+git clone https://github.com/curbob/openclaw-backup.git
+cd openclaw-backup
+npm install
+npm run build
 ```
 
-## Cloud Storage
+### Global Install (coming soon)
+
+```bash
+npm install -g openclaw-backup
+```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `init` | Initialize backup repository and generate encryption key |
+| `backup` | Create a new backup snapshot |
+| `restore <id> <dir>` | Restore a snapshot to a directory |
+| `list` | List all snapshots |
+| `status` | Show backup status and stats |
+| `serve` | Start web UI server (port 11480) |
+| `schedule enable` | Enable automatic scheduled backups |
+| `schedule disable` | Disable scheduled backups |
+| `schedule status` | Show current schedule |
+| `remote list` | List configured remote destinations |
+| `remote add gdrive` | Add Google Drive as backup destination |
+| `remote remove <name>` | Remove a remote destination |
+| `remote test <name>` | Test connection to a remote |
+
+## Web UI
+
+Start the dashboard:
+
+```bash
+node dist/cli/index.js serve
+```
+
+Open http://localhost:11480 to:
+- View backup history and stats
+- Trigger manual backups
+- Restore from any snapshot
+- Configure schedule and settings
+
+## Configuration
+
+Config files are stored in `~/.config/openclaw-backup/`:
+
+```
+~/.config/openclaw-backup/
+├── config.json          # Settings (source path, schedule, etc.)
+├── encryption.key       # Your encryption key (KEEP THIS SAFE!)
+└── gdrive-token.json    # Google Drive OAuth token (if configured)
+```
+
+Data is stored in `~/.local/share/openclaw-backup/`:
+
+```
+~/.local/share/openclaw-backup/
+├── backup.db            # SQLite index (snapshots, file metadata)
+└── chunks/              # Encrypted chunk storage
+    ├── ab/
+    │   └── ab3f...      # Chunks organized by hash prefix
+    └── ...
+```
+
+## Cloud Destinations
+
+### Google Drive
 
 ```bash
 # Add Google Drive
-openclaw-backup remote add gdrive
+node dist/cli/index.js remote add gdrive
 
-# Add S3
-openclaw-backup remote add s3 --bucket my-backups --region us-east-1
+# This opens a browser for OAuth authorization
+# Tokens are stored locally and refresh automatically
 
-# Test connection
-openclaw-backup remote test
+# Test the connection
+node dist/cli/index.js remote test gdrive
 ```
+
+Backups are stored in an `OpenClaw-Backups` folder in your Drive root.
 
 ## How It Works
 
-1. **Chunking** — Files are split into content-defined chunks using FastCDC
-2. **Deduplication** — Identical chunks are stored once (SHA-256 addressed)
-3. **Encryption** — Each chunk is encrypted with XChaCha20-Poly1305
-4. **Storage** — Encrypted chunks uploaded to your chosen destination
-5. **Index** — SQLite database tracks snapshots and chunk references
+1. **Scan** — Walk the source directory, collect file metadata
+2. **Chunk** — Split files into variable-size chunks using FastCDC
+3. **Deduplicate** — Skip chunks that already exist (by SHA-256 hash)
+4. **Encrypt** — Encrypt new chunks with XChaCha20-Poly1305
+5. **Store** — Write encrypted chunks to local storage and/or cloud
+6. **Index** — Record snapshot metadata in SQLite
+
+On restore, the process reverses: read chunks → decrypt → reassemble files.
+
+## Security
+
+- **Encryption**: XChaCha20-Poly1305 (libsodium via sodium-native)
+- **Key derivation**: Argon2id with secure random salt
+- **Chunk hashes**: SHA-256
+- **Key storage**: Local file with restrictive permissions (0600)
+
+⚠️ **Back up your encryption key!** Without `~/.config/openclaw-backup/encryption.key`, your backups are unrecoverable.
 
 ## Development
 
 ```bash
-# Clone
-git clone https://github.com/openclaw/openclaw-backup
-cd openclaw-backup
-
-# Install deps
+# Install dependencies
 npm install
 
-# Run CLI in dev mode
-npm run cli -- backup
-
-# Build
+# Build everything
 npm run build
+
+# Build CLI only
+npx tsc
+
+# Build web UI only
+npm run build:web
+
+# Development server (web UI with hot reload)
+npm run dev:web
 ```
 
 ## Roadmap
 
-- [x] CLI scaffold
-- [x] Chunking & crypto modules
-- [ ] SQLite index
-- [ ] Local storage backend
-- [ ] Google Drive backend
-- [ ] Web UI
-- [ ] Electron desktop app
-- [ ] System tray integration
+- [ ] Compression before encryption (zstd)
+- [ ] Cleanup command for orphan chunks
+- [ ] Multi-destination backup (local + cloud simultaneously)
+- [ ] S3/B2/Backblaze support
+- [ ] Retention policies (keep last N snapshots)
+- [ ] Integrity verification command
 
 ## License
 
 MIT
+
+## Related
+
+- [OpenClaw](https://github.com/openclaw/openclaw) — The AI agent platform this tool backs up
