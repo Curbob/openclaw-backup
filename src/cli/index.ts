@@ -12,8 +12,13 @@ import { join } from 'path';
 
 const program = new Command();
 
-const CONFIG_DIR = join(homedir(), '.openclaw-backup');
-const DEFAULT_SOURCE = join(homedir(), 'clawd');
+// Config lives outside any workspace - never inside what we're backing up
+const CONFIG_DIR = process.env.XDG_CONFIG_HOME 
+  ? join(process.env.XDG_CONFIG_HOME, 'openclaw-backup')
+  : join(homedir(), '.config', 'openclaw-backup');
+
+// Default source is OpenClaw workspace, but can be any folder
+const DEFAULT_SOURCE = process.env.OPENCLAW_WORKSPACE || join(homedir(), 'clawd');
 
 program
   .name('openclaw-backup')

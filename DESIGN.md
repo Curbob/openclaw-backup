@@ -3,6 +3,17 @@
 ## Overview
 Open-source, cross-platform backup system for OpenClaw workspaces with encryption, incremental snapshots, and cloud storage support.
 
+## ⚠️ Key Principle: Standalone Tool
+
+This is a **standalone backup utility**, NOT part of OpenClaw itself.
+
+- Installs globally via npm, Homebrew, or as a standalone binary
+- Config lives in `~/.config/openclaw-backup/` (XDG) or `~/.openclaw-backup/`
+- Never lives inside the directory it backs up
+- Can back up any folder — OpenClaw workspaces are just the primary use case
+
+**Why?** You don't want the backup software inside the backup. That's circular and weird.
+
 ---
 
 ## Architecture
